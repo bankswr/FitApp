@@ -14,7 +14,7 @@ Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, h
   - Each person's data lives only on their own phone.
 
 ## Distribution
-- **Android:** a signed APK built on Linux and shared directly (e.g. attached to a GitHub release). Friends allow \"install unknown apps\" once. Capacitor gives native local notifications, so the rest-timer alarm can fire while the phone is locked.
+- **Android:** a signed APK built on Linux and shared directly (e.g. attached to a GitHub release). Friends allow \"install unknown apps\" once. The rest-timer alarm fires while the phone is locked (an app-side plugin; see the rest timer in `data-model.md`).
 - **iPhone (no Mac, no store):** the same offline build as an installable PWA. It's opened once in Safari from a static URL, then Share → Add to Home Screen, and from then on runs offline. Only the app's files are hosted (e.g. GitHub Pages); user data never leaves the phone. Limits:
   - No rest-timer alarm while locked (web apps can't schedule local notifications).
   - iOS may clear site storage in rare cases, so an on-device backup file matters.
@@ -107,7 +107,7 @@ Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, h
 - Regenerate the fixtures (gitignored, personal data) with `../.venv/bin/python test/parity/oracle_text.py`, `test/parity/oracle_scenario.py` and `../scripts/export_for_mobile.py test/fixtures/flask-backup.json` (from `mobile/`).
 - **On-device testing:** Playwright's `connect_over_cdp` can't attach to an Android WebView; it disconnects. Instead:
   1. Forward the WebView's page socket: `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>`.
-  2. Send `Runtime.evaluate` over `ws://127.0.0.1:9333/devtools/page/<id>` with websocket-client.
+  2. Send `Runtime.evaluate` over `ws://127.0.0.1:9333/devtools/page/<id>` with websocket-client. Pass `suppress_origin=True` to `create_connection`, or the WebView rejects the handshake (403, `--remote-allow-origins`). Don't `location.reload()`: the SQLite plugin's connection survives and startup fails with "Connection fitapp already exists"; restart the app with `am force-stop` + `am start` instead.
   3. Drive native parts with adb (`input keyevent BACK/HOME`, `dumpsys notification`, `run-as ... cat databases/fitappSQLite.db`).
   - Grant `POST_NOTIFICATIONS` with `pm grant` for tests.
 

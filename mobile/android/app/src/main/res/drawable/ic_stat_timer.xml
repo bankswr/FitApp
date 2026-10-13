@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon for the rest timer notifications: the day view's stopwatch. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,14m-7,0a7,7 0,1 1,14 0a7,7 0,1 1,-14 0M12,14V10.5M10,3h4M12,3v4M18.5,7.5l1.5,-1.5" />
+</vector>

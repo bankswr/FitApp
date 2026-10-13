@@ -4,7 +4,7 @@
 // set that qualifies is checked off (see restAfterSets for the superset rule).
 import { html } from "lit-html";
 import { formatDuration } from "../../logic/text";
-import { alarmHaptic, cancelRestAlarm, prepareRestAlarms, scheduleRestAlarm } from "../native";
+import { alarmHaptic, clearRestTimer, prepareRestAlarms, showRestTimer } from "../native";
 
 const KEY = "fitapp.restTimer";
 const DEFAULTS = { duration: 90, auto: true, endsAt: null as number | null };
@@ -128,6 +128,8 @@ export function mountRestTimer(root: HTMLElement, signal: AbortSignal): { onSetC
   const state = loadState();
   const save = () => saveState(state);
   const remaining = () => (state.endsAt ? Math.ceil((state.endsAt - Date.now()) / 1000) : null);
+  // The phone's countdown notification and end alarm follow endsAt (native.ts).
+  const syncPhone = () => (state.endsAt ? showRestTimer(state.endsAt) : clearRestTimer());
 
   function render() {
     const r = remaining();
@@ -146,30 +148,32 @@ export function mountRestTimer(root: HTMLElement, signal: AbortSignal): { onSetC
   }
   function update() {
     const r = remaining();
-    if (r != null && r <= 0) finish();
+    // Well past the end means the app was paused (phone asleep): the phone's alarm already rang.
+    if (r != null && r <= 0) finish(r > -2);
     else render();
   }
   function start() {
     state.endsAt = Date.now() + state.duration * 1000;
     save();
     run();
-    void prepareRestAlarms(); // ask for notification permission now, not mid-rest
+    void prepareRestAlarms().then(syncPhone); // ask for notification permission now, not mid-rest
   }
   function stop() {
     clearInterval(tick);
-    void cancelRestAlarm();
+    void clearRestTimer();
     state.endsAt = null;
     save();
     bar.dataset.state = "idle";
     render();
   }
-  function finish() {
+  function finish(loud: boolean) {
     clearInterval(tick);
+    void clearRestTimer();
     state.endsAt = null;
     save();
     bar.dataset.state = "done";
     time.textContent = "0:00";
-    alarm();
+    if (loud) alarm();
     doneTimer = window.setTimeout(() => {
       bar.dataset.state = "idle";
       render();
@@ -188,22 +192,19 @@ export function mountRestTimer(root: HTMLElement, signal: AbortSignal): { onSetC
     state.endsAt += Number(btn.dataset.adjust) * 1000;
     if (remaining()! <= 0) return stop();
     save();
+    void syncPhone();
     render();
   }, { signal });
-  // In the background the in-app alarm can't run, so a phone gets a scheduled notification
-  // instead; coming back cancels it and catches up (intervals are throttled in the background).
+  // Coming back catches up (intervals are throttled or paused in the background).
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      if (state.endsAt) void scheduleRestAlarm(state.endsAt);
-    } else {
-      void cancelRestAlarm();
-      if (state.endsAt) update();
-    }
+    if (!document.hidden && state.endsAt) update();
   }, { signal });
 
   // Resume a countdown already running (e.g. from another day); one that expired long ago resets quietly.
-  if (state.endsAt && remaining()! > -10) run();
-  else {
+  if (state.endsAt && remaining()! > -10) {
+    run();
+    if (state.endsAt) void syncPhone();
+  } else {
     state.endsAt = null;
     save();
     render();
