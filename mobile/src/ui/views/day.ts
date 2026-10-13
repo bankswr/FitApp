@@ -457,8 +457,12 @@ function mountDay(
     const row = check.closest<HTMLElement>("[data-set]")!;
     const completed = check.getAttribute("aria-pressed") !== "true";
     const body: Record<string, unknown> = { completed };
+    // Checking off fills each empty field with its target, when it has one (user requirement).
     try {
-      for (const input of row.querySelectorAll<HTMLInputElement>("input[data-field]")) body[input.dataset.field!] = readField(input);
+      const targets = completed ? await day.setTargetValues(db, Number(row.dataset.set)) : {};
+      for (const input of row.querySelectorAll<HTMLInputElement>("input[data-field]")) {
+        body[input.dataset.field!] = readField(input) ?? targets[input.dataset.field!] ?? null;
+      }
     } catch (err) {
       return toast((err as Error).message);
     }

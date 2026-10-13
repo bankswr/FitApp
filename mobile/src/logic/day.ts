@@ -56,6 +56,21 @@ export const setState = (s: LogSet) => ({
   completed: s.completed_at !== null,
 });
 
+/**
+ * The values a set's targets stand for, by log field (user requirement, 2026-10-13): checking off a
+ * set fills each empty field with these, i.e. whatever number its placeholder shows. Reps come from
+ * the reps placeholder (`target_label`) when it's a number: autoregulation's `target_reps`, AMRAP
+ * sets included, or a fixed range like 5–5. A range ("8–12"), "8+" or a plain "AMRAP" has none.
+ */
+export function targetValues(s: LogSet): Record<string, number | null> {
+  return {
+    weight: s.target_weight,
+    reps: /^\d+$/.test(s.target_label) ? Number(s.target_label) : null,
+    duration_seconds: s.target_duration_seconds,
+    distance: s.target_distance,
+  };
+}
+
 export function checkDate(value: unknown): string {
   if (!parseIsoDate(value)) throw new NotFoundError("That isn’t a valid date.");
   return value as string;
@@ -281,6 +296,11 @@ async function getSet(db: Db, id: number): Promise<LogSet> {
   const row = await get(db, "SELECT * FROM log_set WHERE id = ?", [id]);
   if (!row) throw new NotFoundError("That set no longer exists.");
   return toLogSet(row);
+}
+
+/** `targetValues` of a set by id. */
+export async function setTargetValues(db: Db, setId: number) {
+  return targetValues(await getSet(db, setId));
 }
 
 /**
