@@ -8,6 +8,7 @@
   --accent: #22c55e;
   --accent-text: #052e16;
   --danger: #f87171;
+  --blue: #60a5fa;
   --radius: 12px;
   /* Space taken by the phone's status bar / camera cutout (top) and gesture bar (bottom).
      Browsers expose env(); the Android app (Capacitor, edge-to-edge) also sets --safe-area-inset-*. */
@@ -564,7 +565,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .deload-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
 .deload-row .hint { margin: 0; }
 .deload-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-.rep-range { display: block; font-weight: 400; font-size: 0.85em; line-height: 1.1; color: var(--muted); }
+.range-note { display: block; font-weight: 400; font-size: 0.85em; line-height: 1.1; color: var(--muted); }
 .field > label.switch { display: flex; margin: 8px 0 0; }
 
 .log-list { display: flex; flex-direction: column; gap: 14px; margin: 8px 0 20px; }
@@ -677,7 +678,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   align-items: center;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 2px solid var(--blue); /* stands out from the cards behind it (user requirement) */
   background: var(--surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
   z-index: 9;
@@ -913,7 +914,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
-.note.exercise-note { border-left-color: #60a5fa; }
+.note.exercise-note { border-left-color: var(--blue); }
 .note.session-note { border-left-color: var(--accent); }
 .note-kind {
   display: block;

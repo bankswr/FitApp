@@ -117,7 +117,7 @@ async function dayView(ctx: Ctx, date: string) {
       const { min, max } = repRange({ reps_min: x.target_reps_min, reps_max: x.target_reps_max });
       return `${min}–${max}`;
     }))];
-    return ranges.length ? html`<span class="rep-range">${ranges.join(" · ")}</span>` : "";
+    return ranges.length ? html`<span class="range-note">${ranges.join(" · ")}</span>` : "";
   };
 
   const card = (lx: LogEntry) => html`

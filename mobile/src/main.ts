@@ -8,6 +8,7 @@ import { syncMuscleGroups } from "./logic/muscles";
 import { seedDefaultPresets } from "./logic/presets";
 import { start } from "./ui/app";
 import { initBackButton, initWebApp } from "./ui/native";
+import { initOverwriteOnEdit } from "./ui/overwrite";
 import "./ui/views/day";
 import "./ui/views/exercises";
 import "./ui/views/progress";
@@ -25,6 +26,7 @@ async function main() {
     await seedDefaultExercises(db);
   }
   initBackButton();
+  initOverwriteOnEdit();
   start(db);
 }
 
