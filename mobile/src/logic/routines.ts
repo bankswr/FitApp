@@ -139,9 +139,10 @@ export async function routineNextIndex(db: Db, routine: Routine, date: string): 
   const order = routine.workout_ids;
   const unique = [...new Set(order)];
   const rows = await db.all(
-    `SELECT date, workout_id, MIN(position) AS first FROM log_exercise
-     WHERE workout_id IN (${unique.map(() => "?").join(",") || "NULL"}) AND date <= ?
-     GROUP BY date, workout_id ORDER BY date DESC, first DESC LIMIT ?`,
+    // One entry per workout done (log_workout, schema 4), so a workout done twice on a day counts twice.
+    `SELECT lw.date, lw.workout_id, MIN(lx.position) AS first FROM log_workout lw JOIN log_exercise lx ON lx.log_workout_id = lw.id
+     WHERE lw.workout_id IN (${unique.map(() => "?").join(",") || "NULL"}) AND lw.date <= ?
+     GROUP BY lw.id ORDER BY lw.date DESC, first DESC LIMIT ?`,
     [...unique, date, order.length * 3],
   );
   const history = rows.map((r) => r.workout_id as number); // most recent first

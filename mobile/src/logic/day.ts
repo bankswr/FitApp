@@ -2,6 +2,7 @@
 // autosave, notes, reordering, and calendar counts. Ported from app.py.
 import { type Db, get, type Row, utcNow } from "../db/types";
 import { autoregulatedTargets, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets } from "./autoregulation";
+import { joinDayWorkout, pruneLogWorkouts, workoutForNewExercises } from "./dayWorkouts";
 import { ConflictError, NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
 import { getRoutine, routineNextIndex } from "./routines";
@@ -37,6 +38,7 @@ export interface LogEntry {
   exercise: Exercise;
   workout_id: number | null;
   workout_name: string | null;
+  log_workout_id: number | null;
   sets: LogSet[];
 }
 
@@ -91,6 +93,7 @@ export async function loadEntries(db: Db, where: string, params: unknown[]): Pro
   return rows.map((r) => ({
     id: r.id, date: r.date, position: r.position, superset_group: r.superset_group, note: r.note,
     exercise: exercises.get(r.exercise_id)!, workout_id: r.workout_id, workout_name: r.workout_name,
+    log_workout_id: r.log_workout_id,
     sets: sets.filter((s) => s.log_exercise_id === r.id).map(toLogSet),
   }));
 }
@@ -130,6 +133,7 @@ export const dayBlocks = (entries: LogEntry[]) => groupBlocks(entries);
  */
 export function dayToWorkoutItems(entries: LogEntry[]): Item[] {
   return entries.map((lx, i) => ({
+    lx: lx.id,
     exercise_id: lx.exercise.id,
     superset_next: lx.superset_group !== null && entries[i + 1]?.superset_group === lx.superset_group,
     sets: lx.sets.map(() => ({ min: null, max: null, amrap: false, weight: null, time: null, distance: null })),
@@ -148,6 +152,9 @@ async function nextPositionAndGroup(db: Db, date: string): Promise<[number, numb
 export async function addWorkoutToDay(db: Db, date: string, workout: Workout, adjusted?: (SetTargets | null)[][]): Promise<void> {
   await db.transaction(async () => {
     let [position, lastGroup] = await nextPositionAndGroup(db, date);
+    const logWorkoutId = (await db.run(
+      "INSERT INTO log_workout (date, workout_id, name) VALUES (?, ?, ?)", [date, workout.id, workout.name],
+    )).lastId;
     const groups = new Map<number, number>(); // workout superset_group -> day superset_group
     for (const [i, wx] of workout.slots.entries()) {
       let group: number | null = null;
@@ -156,8 +163,8 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
         group = groups.get(wx.superset_group)!;
       }
       const entryId = (await db.run(
-        "INSERT INTO log_exercise (date, position, exercise_id, workout_id, superset_group) VALUES (?, ?, ?, ?, ?)",
-        [date, position, wx.exercise.id, workout.id, group],
+        "INSERT INTO log_exercise (date, position, exercise_id, workout_id, superset_group, log_workout_id) VALUES (?, ?, ?, ?, ?, ?)",
+        [date, position, wx.exercise.id, workout.id, group, logWorkoutId],
       )).lastId;
       for (const [n, ws] of wx.sets.entries()) {
         const a = adjusted?.[i]?.[n];
@@ -202,8 +209,10 @@ export async function loadRoutine(db: Db, date: string, routineId: number, index
 /**
  * Appends exercises to a day in the given order: 3 empty sets each, or 1 if it doesn't track reps.
  * Autoregulated: each one's targets come from that exercise's last session, as with the AR button.
+ * `joinWorkout` (the day screen passes true; off keeps Flask parity): they join the workout in
+ * progress, else the latest unfinished one, else stay outside any (agent-notes/day-workouts.md).
  */
-export async function addExercises(db: Db, date: string, ids: unknown, autoregulate = false): Promise<void> {
+export async function addExercises(db: Db, date: string, ids: unknown, autoregulate = false, joinWorkout = false): Promise<void> {
   checkDate(date);
   if (!Array.isArray(ids) || !ids.length || ids.some((i) => typeof i !== "number" || !Number.isInteger(i))) {
     throw new ValidationError("Pick at least one exercise.");
@@ -212,14 +221,18 @@ export async function addExercises(db: Db, date: string, ids: unknown, autoregul
   if (byId.size !== new Set(ids).size) throw new NotFoundError("One of the selected exercises no longer exists.");
   await db.transaction(async () => {
     const [position] = await nextPositionAndGroup(db, date);
+    const added: number[] = [];
     for (const [offset, exerciseId] of (ids as number[]).entries()) {
       const entryId = (await db.run(
         "INSERT INTO log_exercise (date, position, exercise_id) VALUES (?, ?, ?)", [date, position + offset, exerciseId],
       )).lastId;
+      added.push(entryId);
       const count = byId.get(exerciseId)!.tracks.reps ? 3 : 1;
       for (let n = 1; n <= count; n++) await db.run("INSERT INTO log_set (log_exercise_id, position) VALUES (?, ?)", [entryId, n]);
       if (autoregulate && byId.get(exerciseId)!.tracks.reps) await targetsFromLastSession(db, entryId);
     }
+    const target = joinWorkout ? await workoutForNewExercises(db, date) : null;
+    if (target !== null) await joinDayWorkout(db, date, target, added);
   });
 }
 
@@ -257,9 +270,11 @@ export async function reorderDay(db: Db, date: string, ids: unknown): Promise<vo
 export async function setSupersetWithNext(db: Db, entryId: number, link: boolean): Promise<void> {
   const entry = await get(db, "SELECT date FROM log_exercise WHERE id = ?", [entryId]);
   if (!entry) throw new NotFoundError("That exercise is no longer on this day.");
-  const rows = await db.all("SELECT id, superset_group FROM log_exercise WHERE date = ? ORDER BY position", [entry.date]);
+  const rows = await db.all("SELECT id, superset_group, log_workout_id FROM log_exercise WHERE date = ? ORDER BY position", [entry.date]);
   const i = rows.findIndex((r) => r.id === entryId);
   if (i === rows.length - 1) throw new ValidationError("There’s no exercise below to superset with.");
+  // Supersets never cross a workout's edge (agent-notes/day-workouts.md).
+  if (link && rows[i].log_workout_id !== rows[i + 1].log_workout_id) throw new ValidationError("A superset can’t cross into another workout.");
   const groups: (number | null)[] = rows.map((r) => r.superset_group);
   const fresh = Math.max(0, ...groups.map((g) => g ?? 0)) + 1;
   const linked = groups[i] !== null && groups[i] === groups[i + 1];
@@ -403,7 +418,10 @@ export async function updateNotes(db: Db, entryId: number, data: { exercise_note
 /** Removes an exercise (and its sets) from its day. Returns the exercise name. */
 export async function deleteLogEntry(db: Db, entryId: number): Promise<string> {
   const entry = await getEntry(db, entryId);
-  await db.run("DELETE FROM log_exercise WHERE id = ?", [entryId]);
+  await db.transaction(async () => {
+    await db.run("DELETE FROM log_exercise WHERE id = ?", [entryId]);
+    await pruneLogWorkouts(db, entry.date);
+  });
   return entry.exercise.name;
 }
 
@@ -414,6 +432,7 @@ export async function clearDay(db: Db, date: string): Promise<number> {
   const n = (await get(db, "SELECT COUNT(*) AS n FROM log_exercise WHERE date = ?", [date]))!.n as number;
   await db.transaction(async () => {
     await db.run("DELETE FROM log_exercise WHERE date = ?", [date]);
+    await db.run("DELETE FROM log_workout WHERE date = ?", [date]);
     await db.run("DELETE FROM deload_day WHERE date = ?", [date]); // the deload mark goes too (user)
   });
   return n;

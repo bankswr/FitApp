@@ -2,6 +2,7 @@
 // workout_builder.html and static/workout_builder.js.
 import { html, nothing } from "lit-html";
 import { dayEntries, dayToWorkoutItems } from "../../logic/day";
+import { wrapIntoDayWorkout } from "../../logic/dayWorkouts";
 import { exercisePickerData, type PickerOption } from "../../logic/exercises";
 import {
   deleteWorkout, getWorkout, groupBlocks, type Item, listWorkouts, saveWorkout, slotSummary, type Workout, workoutDeleteBlocker,
@@ -14,6 +15,7 @@ import { quickFillOn } from "../prefs";
 import { exerciseFilter, filterControls } from "../exerciseFilter";
 import { formatTime, parseTime } from "../time";
 import { takeCreatedExercises } from "./exercises";
+import { restSeconds } from "./restTimer";
 
 const DELETE_DETAIL = "This permanently removes the workout plan. Days you’ve already logged keep their sets.";
 
@@ -136,10 +138,17 @@ async function builder(ctx: Ctx, workout: Workout | null) {
       mountBuilder(root, signal, options, items, here, async (rawName, finalItems) => {
         const result = await saveWorkout(ctx.db, workout?.id ?? null, rawName, finalItems);
         if (result.ok) {
+          // From a day (user): the day's exercises still in the template become this workout there.
+          if (fromDay) {
+            await wrapIntoDayWorkout(ctx.db, fromDay, result.id, result.name, finalItems.flatMap((it) => (it.lx ? [it.lx] : [])),
+              ctx.today, new Date(), restSeconds());
+          }
           flash(`Saved “${result.name}”.`);
           returnTo(back);
         } else {
-          stash({ errors: result.errors, name: result.name, items: result.items } satisfies BuilderStash);
+          // Keep each item's day entry through the round trip (the saved items come back in order).
+          const kept = result.items.map((it, i) => (finalItems[i]?.exercise_id === it.exercise_id ? { ...it, lx: finalItems[i].lx } : it));
+          stash({ errors: result.errors, name: result.name, items: kept } satisfies BuilderStash);
           await refresh();
           window.scrollTo(0, 0);
         }
@@ -166,7 +175,7 @@ const FIELDS = ["min", "max", "weight", "time", "distance"] as const;
 const TEXT_FIELDS = ["weight", "time", "distance"];
 type Field = (typeof FIELDS)[number];
 type EditSet = { min: number | null; max: number | null; amrap: boolean; weight: string | null; time: string | null; distance: string | null };
-type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<Field, boolean> };
+type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<Field, boolean>; lx?: number };
 
 function mountBuilder(
   root: HTMLElement, signal: AbortSignal, options: PickerOption[], initial: Item[], draftKey: string,
@@ -184,7 +193,7 @@ function mountBuilder(
     }));
     // Loaded workouts (edit / failed save): a column that already has values counts as filled.
     const filled = Object.fromEntries(FIELDS.map((f) => [f, sets.some((st) => st[f] != null)])) as Record<Field, boolean>;
-    return { exercise_id: it.exercise_id, superset_next: it.superset_next, sets, filled };
+    return { exercise_id: it.exercise_id, superset_next: it.superset_next, sets, filled, lx: it.lx };
   });
 
   const list = root.querySelector<HTMLElement>("#builder-list")!;

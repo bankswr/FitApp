@@ -129,7 +129,8 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
           <p class="hint">Weekly sets per muscle group: one pass through the routine, scaled by
             7&nbsp;÷&nbsp;<span data-cycle-echo>${cycleDays}</span> days. A primary muscle counts
             ${MUSCLE_SET_WEIGHTS.primary} per set; an ancillary muscle counts ${MUSCLE_SET_WEIGHTS.ancillary}.
-            Enter the weekly minimum for each group (or apply a preset); the bar fills toward it.</p>
+            Enter the weekly minimum for each group (or apply a preset). Bars are scaled to the group with the
+            most sets; the tick marks the minimum, and a bar is red until it reaches it.</p>
           <ul class="muscle-volume" id="muscle-volume">
             ${muscles.map((mg) => html`
               <li data-muscle=${mg.name}>
@@ -142,7 +143,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
                            placeholder="–" aria-label="Target sets for ${mg.name}">
                     <span class="mv-unit">sets</span></span>
                 </div>
-                <div class="mv-bar" aria-hidden="true"><span></span></div>
+                <div class="mv-bar" aria-hidden="true"><span></span><i class="mv-min"></i></div>
                 <div class="mv-detail" data-detail></div>
               </li>`)}
           </ul>
@@ -259,23 +260,31 @@ function mountRoutineEditor(
     }
     const scale = 7 / cycleDays();
     root.querySelector("[data-cycle-echo]")!.textContent = String(cycleDays());
-    for (const row of volumeList.children as HTMLCollectionOf<HTMLElement>) {
+    const rows = [...volumeList.children as HTMLCollectionOf<HTMLElement>].map((row) => {
       const c = raw.get(row.dataset.muscle!) ?? { primary: 0, ancillary: 0 };
       const primary = c.primary * scale;
       const ancillary = c.ancillary * scale;
-      const total = primary * MUSCLE_SET_WEIGHTS.primary + ancillary * MUSCLE_SET_WEIGHTS.ancillary;
+      return { row, primary, ancillary, total: primary * MUSCLE_SET_WEIGHTS.primary + ancillary * MUSCLE_SET_WEIGHTS.ancillary };
+    });
+    // Every bar shares one scale: the group with the most sets is full width.
+    const most = Math.max(0, ...rows.map((r) => r.total));
+    const pct = (v: number) => `${most ? Math.min(1, v / most) * 100 : 0}%`;
+    for (const { row, primary, ancillary, total } of rows) {
       const target = readTarget(row.querySelector(".mv-target")!);
       row.querySelector("[data-total]")!.textContent = truncate1(total);
       const parts: string[] = [];
       if (primary) parts.push(`${truncate1(primary)} primary`);
       if (ancillary) parts.push(`${truncate1(ancillary)} ancillary`);
-      // Targets are weekly minimums; 0 (or blank) means no minimum, so no bar.
+      // Targets are weekly minimums; 0 (or blank) means no minimum, so no tick.
       const hasMin = target != null && target > 0;
       if (hasMin && total > target) parts.push(`+${truncate1(total - target)} above`);
       row.querySelector("[data-detail]")!.textContent = parts.join(" · ");
-      row.querySelector<HTMLElement>(".mv-bar span")!.style.width = `${hasMin ? Math.min(1, total / target) * 100 : 0}%`;
+      row.querySelector<HTMLElement>(".mv-bar span")!.style.width = pct(total);
+      // A minimum above the largest group's sets pins to the bar's end.
+      row.querySelector<HTMLElement>(".mv-min")!.style.left = hasMin ? (most ? pct(target) : "100%") : "";
       row.classList.toggle("no-target", !hasMin);
       row.classList.toggle("met", hasMin && total >= target);
+      row.classList.toggle("below", hasMin && total < target);
       row.classList.toggle("none", total === 0 && !hasMin);
     }
   }

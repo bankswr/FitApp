@@ -27,6 +27,9 @@ function saveState(state: TimerState) {
   }
 }
 
+/** The rest-timer length in seconds, added after the last ✓ when a workout is finished automatically. */
+export const restSeconds = () => loadState().duration;
+
 // ---------- settings (on the Settings screen) ----------
 export const restTimerSettings = () => html`
   <section class="card settings-card" id="timer-settings">

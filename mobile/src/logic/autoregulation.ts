@@ -66,18 +66,19 @@ export const NOT_DELOAD = "date NOT IN (SELECT date FROM deload_day)";
 
 /**
  * Targets for every set of the workout's slots when it's loaded on `date`, or null for a set that
- * keeps the plan's targets. The reference is the latest earlier non-deload day the workout was
- * logged (from any source); its exercises are matched to the slots by exercise, in order, so a
+ * keeps the plan's targets. The reference is the workout's latest earlier non-deload session (a
+ * log_workout; the later one when it was done twice on a day); its exercises are matched to the slots by exercise, in order, so a
  * rearranged workout still lines up. A slot whose exercise wasn't in that session (replaced) uses
  * the exercise's own latest earlier non-deload entry. Never done before: the plan, unchanged.
  */
 export async function autoregulatedTargets(db: Db, date: string, workoutId: number, slots: WorkoutSlot[]): Promise<(SetTargets | null)[][]> {
   const planOnly = slots.map((wx) => wx.sets.map(() => null));
-  const last = await get(db, `SELECT MAX(date) AS d FROM log_exercise WHERE workout_id = ? AND date < ? AND ${NOT_DELOAD}`, [workoutId, date]);
-  if (!last?.d) return planOnly;
-  const previous = await db.all(
-    "SELECT id, exercise_id FROM log_exercise WHERE workout_id = ? AND date = ? ORDER BY position", [workoutId, last.d],
-  );
+  const last = await get(db,
+    `SELECT lw.id FROM log_workout lw JOIN log_exercise lx ON lx.log_workout_id = lw.id
+     WHERE lw.workout_id = ? AND lw.date < ? AND lw.date NOT IN (SELECT date FROM deload_day)
+     GROUP BY lw.id ORDER BY lw.date DESC, MIN(lx.position) DESC LIMIT 1`, [workoutId, date]);
+  if (!last) return planOnly;
+  const previous = await db.all("SELECT id, exercise_id FROM log_exercise WHERE log_workout_id = ? ORDER BY position", [last.id]);
   const used = new Set<number>();
   const result: (SetTargets | null)[][] = [];
   for (const wx of slots) {

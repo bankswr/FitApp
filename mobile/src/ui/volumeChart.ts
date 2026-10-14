@@ -5,7 +5,9 @@ const SVG = "http://www.w3.org/2000/svg";
 const BAR = "#16a34a"; // validated against the card surface (dataviz validate_palette, dark mode)
 const BAR_ACTIVE = "#22c55e"; // the hovered bar lifts a step lighter
 const PLOT_H = 180;
-const AXIS_H = 22; // x-axis label band, included in the container height
+const AXIS_H = 46; // x-axis label band (angled dates), included in the container height
+const LABEL_ANGLE = -75; // steep enough that neighbouring days stay readable on a month range
+const MIN_LABEL_GAP = 9; // px between angled labels; narrower day columns switch to weekly labels
 const LEFT = 44; // y-axis label gutter
 const TOP = 8;
 
@@ -46,8 +48,8 @@ export function mountVolumeChart(chart: HTMLElement, days: { date: string; volum
     const width = chart.clientWidth;
     const plotW = width - LEFT - 4;
     const max = Math.max(...days.map((d) => d.volume));
-    const step = niceStep(max);
-    const top = Math.ceil(max / step) * step;
+    const step = niceStep(max || 100); // an empty range still gets a 0–100 axis
+    const top = max ? Math.ceil(max / step) * step : 4 * step;
     const y = (v: number) => TOP + PLOT_H - (v / top) * PLOT_H;
     band = plotW / days.length;
     const barW = Math.max(1, Math.min(24, band - 2)); // 2px surface gap between neighbours
@@ -64,16 +66,18 @@ export function mountVolumeChart(chart: HTMLElement, days: { date: string; volum
       const x = LEFT + i * band + (band - barW) / 2;
       return el("path", { d: barPath(x, y(d.volume), barW, y(0) - y(d.volume)), fill: BAR }, svg);
     });
-    // ~5 evenly spaced date labels, always including the first and last day.
-    const labelCount = Math.min(days.length, Math.max(2, Math.floor(plotW / 70)));
-    const seen = new Set<number>();
-    for (let k = 0; k < labelCount; k++) {
-      const i = Math.round((k * (days.length - 1)) / Math.max(1, labelCount - 1));
-      if (seen.has(i)) continue;
-      seen.add(i);
-      const anchor = k === 0 ? "start" : k === labelCount - 1 ? "end" : "middle";
-      const x = k === 0 ? LEFT : k === labelCount - 1 ? width : LEFT + (i + 0.5) * band;
-      el("text", { x, y: TOP + PLOT_H + 16, "text-anchor": anchor, class: "tick" }, svg).textContent = shortDate(days[i].date);
+    // Every day with volume gets an angled date label. When day columns are too narrow for that
+    // (a 3-month range on a phone), label every 7th day from the start instead. An empty range
+    // labels its first and last day.
+    const weekly = band < MIN_LABEL_GAP;
+    const labelled = !days.some((d) => d.volume)
+      ? [...new Set([0, days.length - 1])]
+      : days.flatMap((d, i) => ((weekly ? i % 7 === 0 : d.volume) ? [i] : []));
+    for (const i of labelled) {
+      const x = LEFT + (i + 0.5) * band;
+      const ly = TOP + PLOT_H + 10;
+      el("text", { x, y: ly, "text-anchor": "end", "dominant-baseline": "middle",
+        transform: `rotate(${LABEL_ANGLE} ${x} ${ly})`, class: "tick date" }, svg).textContent = shortDate(days[i].date);
     }
     if (active >= 0) show(active);
   }
