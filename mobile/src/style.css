@@ -8,6 +8,7 @@
   --accent: #22c55e;
   --accent-text: #052e16;
   --danger: #f87171;
+  --blue: #60a5fa;
   --radius: 12px;
   /* Space taken by the phone's status bar / camera cutout (top) and gesture bar (bottom).
      Browsers expose env(); the Android app (Capacitor, edge-to-edge) also sets --safe-area-inset-*. */
@@ -324,7 +325,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .mv-name { font-weight: 600; }
 .mv-total { font-weight: 700; font-variant-numeric: tabular-nums; }
 .mv-unit { font-weight: 400; font-size: 0.85rem; color: var(--muted); }
-.mv-bar { height: 6px; margin-top: 4px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.mv-bar { position: relative; height: 6px; margin-top: 4px; border-radius: 999px; background: var(--surface-2); }
 .mv-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
 .mv-detail { margin-top: 3px; font-size: 0.8rem; color: var(--muted); }
 .muscle-volume li.none .mv-name, .muscle-volume li.none [data-total] { opacity: 0.45; }
@@ -338,9 +339,12 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   font-weight: 600;
 }
 .muscle-volume input.mv-target.invalid { border-color: var(--danger); }
-.muscle-volume li.no-target .mv-bar { visibility: hidden; }
+/* Bars share one scale (largest group = full width): red below the minimum, green otherwise;
+   the minimum is a tick on the bar. */
 .muscle-volume li.met .mv-name { color: var(--accent); }
-.muscle-volume li:not(.met):not(.no-target) .mv-bar span { background: color-mix(in srgb, var(--accent) 55%, var(--muted)); }
+.muscle-volume li.below .mv-bar span { background: var(--danger); }
+.mv-min { display: none; position: absolute; top: -3px; width: 2px; height: 12px; margin-left: -1px; border-radius: 1px; background: var(--text); }
+.muscle-volume li:not(.no-target) .mv-min { display: block; }
 .preset-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .preset-row .hint { margin: 0; }
 .routine-item { display: flex; align-items: center; gap: 10px; }
@@ -564,7 +568,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .deload-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
 .deload-row .hint { margin: 0; }
 .deload-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-.rep-range { display: block; font-weight: 400; font-size: 0.85em; line-height: 1.1; color: var(--muted); }
+.range-note { display: block; font-weight: 400; font-size: 0.85em; line-height: 1.1; color: var(--muted); }
 .field > label.switch { display: flex; margin: 8px 0 0; }
 
 .log-list { display: flex; flex-direction: column; gap: 14px; margin: 8px 0 20px; }
@@ -597,6 +601,48 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 }
 .log-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .log-source { font-size: 0.8rem; color: var(--muted); }
+
+/* A workout on the day (agent-notes/day-workouts.md): a blue frame with a one-line header,
+   name · duration · volume, then Start / Finish / Resume and ×. */
+.wblock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 6px 8px;
+  border: 2px solid var(--blue);
+  border-radius: var(--radius);
+}
+.wb-head { display: flex; align-items: center; gap: 8px; min-height: 36px; -webkit-user-select: none; user-select: none; }
+.wb-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.wb-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.wb-stats {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wb-stats.running { color: var(--accent); }
+/* Marks where a workout ends while dragging (an exercise dropped below it is outside the workout). */
+.wb-end { display: none; }
+.log-list.collapsed .wb-end { display: block; height: 4px; border-radius: 2px; background: var(--surface-2); }
+.times-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .log-grid { display: flex; flex-direction: column; gap: 6px; }
 .log-row {
@@ -677,7 +723,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   align-items: center;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 2px solid var(--blue); /* stands out from the cards behind it (user requirement) */
   background: var(--surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
   z-index: 9;
@@ -781,6 +827,13 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .reorder-list.no-anim > * { transition: none; }
 .reorder-list > .dragging { position: relative; z-index: 5; transition: none; }
 .reorder-list > .dragging.settling { transition: transform 0.16s ease-out; }
+/* The day view also drags exercises inside a workout's frame. */
+.reorder-list .wblock > * { transition: transform 0.16s ease-out; }
+.reorder-list.no-anim .wblock > * { transition: none; }
+.reorder-list .wblock > .dragging { position: relative; z-index: 5; transition: none; }
+.reorder-list .wblock > .dragging.settling { transition: transform 0.16s ease-out; }
+.log-list .wblock.dragging { border-color: var(--accent); background: var(--bg); box-shadow: 0 14px 32px rgb(0 0 0 / 0.55); }
+.log-list.collapsed .wb-head .button, .log-list.collapsed .wb-head .icon-btn { display: none; }
 .reorder-list.reordering { -webkit-user-select: none; user-select: none; }
 .log-list [data-block].dragging .log-card, .routine-item.dragging {
   border-color: var(--accent);
@@ -913,7 +966,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
-.note.exercise-note { border-left-color: #60a5fa; }
+.note.exercise-note { border-left-color: var(--blue); }
 .note.session-note { border-left-color: var(--accent); }
 .note-kind {
   display: block;
@@ -975,6 +1028,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chart .grid { stroke: var(--surface-2); stroke-width: 1; }
 .chart .axis { stroke: var(--border); stroke-width: 1; }
 .chart .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .tick.date { font-size: 10px; }
 .chart-tooltip {
   position: absolute;
   top: -6px;

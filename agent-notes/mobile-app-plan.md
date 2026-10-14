@@ -1,7 +1,7 @@
 # Mobile app plan
 Decision and constraints for turning FitApp into a standalone Android/iPhone app.
 
-Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, hosting pending)
+Last updated: 2026-10-14 (schema v4; port complete on Android; iPhone web-app build done, hosting pending)
 
 ## Decision (user, 2026-09-30)
 - **Everything runs on the phone.** The Python logic is ported to TypeScript, with an on-device SQLite database, wrapped with **Capacitor**. The existing HTML/CSS/JS is reused as far as possible.
@@ -14,7 +14,7 @@ Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, h
   - Each person's data lives only on their own phone.
 
 ## Distribution
-- **Android:** a signed APK built on Linux and shared directly (e.g. attached to a GitHub release). Friends allow \"install unknown apps\" once. Capacitor gives native local notifications, so the rest-timer alarm can fire while the phone is locked.
+- **Android:** a signed APK built on Linux and shared directly (e.g. attached to a GitHub release). Friends allow \"install unknown apps\" once. The rest-timer alarm fires while the phone is locked (an app-side plugin; see the rest timer in `data-model.md`).
 - **iPhone (no Mac, no store):** the same offline build as an installable PWA. It's opened once in Safari from a static URL, then Share → Add to Home Screen, and from then on runs offline. Only the app's files are hosted (e.g. GitHub Pages); user data never leaves the phone. Limits:
   - No rest-timer alarm while locked (web apps can't schedule local notifications).
   - iOS may clear site storage in rare cases, so an on-device backup file matters.
@@ -64,7 +64,7 @@ Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, h
 - **Long-press reorder is shared (`ui/dragReorder.ts`, 2026-10-01):** the day view, the routine editor and the workout builder use it. The ↑/↓ buttons were removed from the routine editor and (2026-10-10) the workout builder at the user's request. In the day view and the builder, every card collapses to its name while dragging (user request; `.log-list.collapsed`, `.builder-list.collapsed`). The builder wraps each superset chain in one `<li data-block>`, so a superset moves as a unit like in the day view; the toggles between blocks are separate list items, hidden while dragging. Reordering within a superset means unlinking first. A button marked `data-drag-ok` still starts a long press (the day card's exercise name, which opens its history on a tap; user request, 2026-10-10, replacing the History button). The click that follows a drop is swallowed for 400 ms so it doesn't also tap that button. When it lifts, the helper keeps the item's top where it was on screen and makes its centre follow the finger. After collapsing, a short page can clamp the scroll, so the lifted card may jump to the finger. Still only verified with a mouse.
 - **Day view superset button (user, 2026-10-01):** each card except the day's last has a link-↓ toggle in its action row (instead of the builder's between-card toggles, to save vertical space). `setSupersetWithNext` in `logic/day.ts` links an exercise with the one below. If either is already in a superset, it joins that superset, and two supersets merge. Unlinking splits the superset at that point, and a group left with one exercise becomes NULL. The toggle is pressed (accent colour) while the two are linked.
 - **Progress targets (user, 2026-10-01; schema v2):** the Progress page's "Sets per muscle group" uses the same rows as Volume Planning, with a weekly minimum input and a bar against "per week" for the selected range. Each target is saved when its field is committed, in **`progress_target`** (`muscle_group_id` PK, `sets` ≥ 0). That table is the app's first schema migration (v2) and doesn't exist in Flask. Its **Presets** sheet loads a preset (replacing every target; a group the preset lacks gets 0) or saves the current targets as a new preset (blank = 0, the name must be new). Edit links go to the preset page and back.
-  - Backups export the current schema (`schema: 3` since autoregulation, see `autoregulation.md`). An older backup (including Flask's) imports with no progress targets or deload days, and new columns take their defaults. `test/backup.test.ts` and `test/parity.test.ts` treat tables missing from the Flask fixtures as empty, and compare rows through `asFlaskRows` (`test/sqljs.ts`), which drops mobile-only columns that hold their default. Add any new mobile-only column there.
+  - Backups export the current schema (`schema: 4` since workouts on the day, see `day-workouts.md`; 3 added autoregulation, see `autoregulation.md`). A backup older than schema 4 has its history grouped into workouts on import (`groupLogWorkouts`). An older backup (including Flask's) imports with no progress targets or deload days, and new columns take their defaults. `test/backup.test.ts` and `test/parity.test.ts` treat tables missing from the Flask fixtures as empty, and compare rows through `asFlaskRows` (`test/sqljs.ts`), which drops mobile-only columns that hold their default. Add any new mobile-only column there; mobile-only data *derived* from Flask's (`log_workout`, `log_exercise.log_workout_id`) is skipped via `MOBILE_ONLY_TABLES` / `DERIVED_COLUMNS`.
   - `syncMuscleGroups` counts `progress_target` as a reference before deleting a retired muscle group.
 - **Backups:** Settings → Backup (`backupSettings` in `views/backup.ts`; a Library screen until 2026-10-10). Export goes to the share sheet; Import uses Android's document picker (tested on the signed release APK). Import asks for confirmation first, showing the file's contents, what it replaces, and the export date. The shared confirm panel accepts `data-confirm-label`.
 - **Pending:**
@@ -107,7 +107,7 @@ Last updated: 2026-10-10 (port complete on Android; iPhone web-app build done, h
 - Regenerate the fixtures (gitignored, personal data) with `../.venv/bin/python test/parity/oracle_text.py`, `test/parity/oracle_scenario.py` and `../scripts/export_for_mobile.py test/fixtures/flask-backup.json` (from `mobile/`).
 - **On-device testing:** Playwright's `connect_over_cdp` can't attach to an Android WebView; it disconnects. Instead:
   1. Forward the WebView's page socket: `adb forward tcp:9333 localabstract:webview_devtools_remote_<pid>`.
-  2. Send `Runtime.evaluate` over `ws://127.0.0.1:9333/devtools/page/<id>` with websocket-client.
+  2. Send `Runtime.evaluate` over `ws://127.0.0.1:9333/devtools/page/<id>` with websocket-client. Pass `suppress_origin=True` to `create_connection`, or the WebView rejects the handshake (403, `--remote-allow-origins`). Don't `location.reload()`: the SQLite plugin's connection survives and startup fails with "Connection fitapp already exists"; restart the app with `am force-stop` + `am start` instead.
   3. Drive native parts with adb (`input keyevent BACK/HOME`, `dumpsys notification`, `run-as ... cat databases/fitappSQLite.db`).
   - Grant `POST_NOTIFICATIONS` with `pm grant` for tests.
 

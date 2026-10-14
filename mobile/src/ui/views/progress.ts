@@ -48,11 +48,11 @@ route(/^\/progress$/, async (ctx) => {
       <section class="card chart-card">
         <h2>Volume per day</h2>
         <p class="hint">Sum of weight × reps across completed sets, in lb.</p>
+        <div class="chart" id="volume-chart" tabindex="0" role="img"
+             aria-label="Bar chart of volume per day from ${label(start)} to ${label(end)}. Use the left and right arrow keys to read each day, or open the table below.">
+          <div class="chart-tooltip" id="chart-tooltip" hidden><strong></strong><span></span></div>
+        </div>
         ${p.totalVolume ? html`
-          <div class="chart" id="volume-chart" tabindex="0" role="img"
-               aria-label="Bar chart of volume per day from ${label(start)} to ${label(end)}. Use the left and right arrow keys to read each day, or open the table below.">
-            <div class="chart-tooltip" id="chart-tooltip" hidden><strong></strong><span></span></div>
-          </div>
           <details class="table-view">
             <summary>Show as table</summary>
             <table>
@@ -70,7 +70,8 @@ route(/^\/progress$/, async (ctx) => {
           <button type="button" class="button subtle small" id="open-presets">Presets</button>
         </div>
         <p class="hint">Completed sets in this range: primary muscle 1 per set, ancillary 0.5. Per week = total × 7 ÷ ${p.nDays} days.
-          Enter a weekly minimum for each group (or load a preset); the bar fills toward it.</p>
+          Enter a weekly minimum for each group (or load a preset). Bars are scaled to the group with the most sets;
+          the tick marks the minimum, and a bar is red until it reaches it.</p>
         <ul class="muscle-volume" id="progress-targets">
           ${p.muscles.map((m) => html`
             <li data-id=${m.id} data-name=${m.name} data-week=${m.per_week} data-total-range=${m.total}>
@@ -82,7 +83,7 @@ route(/^\/progress$/, async (ctx) => {
                          placeholder="–" aria-label="Weekly minimum sets for ${m.name}">
                   <span class="mv-unit">/wk</span></span>
               </div>
-              <div class="mv-bar" aria-hidden="true"><span></span></div>
+              <div class="mv-bar" aria-hidden="true"><span></span><i class="mv-min"></i></div>
               <div class="mv-detail" data-detail></div>
             </li>`)}
         </ul>
@@ -134,11 +135,14 @@ const presetSummary = (pr: Preset) => {
 
 // Weekly minimum per muscle group: bars update as you type and each target saves when its field
 // is committed. Presets replace them all; the current targets can be saved as a new preset.
-// (Same bar rules as the routine's Volume Planning tab.)
+// Every bar shares one scale (the group with the most sets per week = full width) and the
+// minimum is a tick on that scale. (Same bar rules as the routine's Volume Planning tab.)
 function mountTargets(root: HTMLElement, signal: AbortSignal, db: Parameters<typeof saveProgressTarget>[0], presets: Preset[]) {
   const list = root.querySelector<HTMLElement>("#progress-targets")!;
   const rows = [...list.children] as HTMLElement[];
   const inputOf = (row: HTMLElement) => row.querySelector<HTMLInputElement>(".mv-target")!;
+  const scale = Math.max(0, ...rows.map((row) => Number(row.dataset.week)));
+  const pct = (v: number) => `${scale ? Math.min(1, v / scale) * 100 : 0}%`;
   const readTarget = (input: HTMLInputElement) => {
     const raw = input.value.trim();
     const n = Number(raw);
@@ -153,9 +157,12 @@ function mountTargets(root: HTMLElement, signal: AbortSignal, db: Parameters<typ
     const parts = total ? [`${truncate1(total)} total in range`] : [];
     if (hasMin && week > target) parts.push(`+${truncate1(week - target)} above`);
     row.querySelector("[data-detail]")!.textContent = parts.join(" · ");
-    row.querySelector<HTMLElement>(".mv-bar span")!.style.width = `${hasMin ? Math.min(1, week / target) * 100 : 0}%`;
+    row.querySelector<HTMLElement>(".mv-bar span")!.style.width = pct(week);
+    // A minimum above the largest group's sets pins to the bar's end.
+    row.querySelector<HTMLElement>(".mv-min")!.style.left = hasMin ? (scale ? pct(target) : "100%") : "";
     row.classList.toggle("no-target", !hasMin);
     row.classList.toggle("met", hasMin && week >= target);
+    row.classList.toggle("below", hasMin && week < target);
     row.classList.toggle("none", week === 0 && !hasMin);
   }
   rows.forEach(render);

@@ -121,6 +121,8 @@ export interface Item {
   exercise_id: number;
   superset_next: boolean;
   sets: ItemSet[];
+  /** "Build workout from day": the day entry it came from (ignored when saving the plan). */
+  lx?: number;
 }
 
 // Planned-set targets other than reps: builder key -> [workout_set column, tracking mode].

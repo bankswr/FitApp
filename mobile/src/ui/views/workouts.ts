@@ -2,6 +2,7 @@
 // workout_builder.html and static/workout_builder.js.
 import { html, nothing } from "lit-html";
 import { dayEntries, dayToWorkoutItems } from "../../logic/day";
+import { wrapIntoDayWorkout } from "../../logic/dayWorkouts";
 import { exercisePickerData, type PickerOption } from "../../logic/exercises";
 import {
   deleteWorkout, getWorkout, groupBlocks, type Item, listWorkouts, saveWorkout, slotSummary, type Workout, workoutDeleteBlocker,
@@ -14,6 +15,7 @@ import { quickFillOn } from "../prefs";
 import { exerciseFilter, filterControls } from "../exerciseFilter";
 import { formatTime, parseTime } from "../time";
 import { takeCreatedExercises } from "./exercises";
+import { restSeconds } from "./restTimer";
 
 const DELETE_DETAIL = "This permanently removes the workout plan. Days you’ve already logged keep their sets.";
 
@@ -136,10 +138,17 @@ async function builder(ctx: Ctx, workout: Workout | null) {
       mountBuilder(root, signal, options, items, here, async (rawName, finalItems) => {
         const result = await saveWorkout(ctx.db, workout?.id ?? null, rawName, finalItems);
         if (result.ok) {
+          // From a day (user): the day's exercises still in the template become this workout there.
+          if (fromDay) {
+            await wrapIntoDayWorkout(ctx.db, fromDay, result.id, result.name, finalItems.flatMap((it) => (it.lx ? [it.lx] : [])),
+              ctx.today, new Date(), restSeconds());
+          }
           flash(`Saved “${result.name}”.`);
           returnTo(back);
         } else {
-          stash({ errors: result.errors, name: result.name, items: result.items } satisfies BuilderStash);
+          // Keep each item's day entry through the round trip (the saved items come back in order).
+          const kept = result.items.map((it, i) => (finalItems[i]?.exercise_id === it.exercise_id ? { ...it, lx: finalItems[i].lx } : it));
+          stash({ errors: result.errors, name: result.name, items: kept } satisfies BuilderStash);
           await refresh();
           window.scrollTo(0, 0);
         }
@@ -154,8 +163,8 @@ async function builder(ctx: Ctx, workout: Workout | null) {
 // updates state in place so focus isn't lost.
 //   items: [{ exercise_id, superset_next, sets: [{ min, max, amrap, weight, time, distance }] }]
 // superset_next links an exercise to the one after it (chains allowed). Each set has a field per
-// mode the exercise tracks: a rep range (+ AMRAP), weight (lb), time, distance (mi). Weight/time/
-// distance are kept as the text typed and parsed on save; time accepts "1:30" or "130".
+// mode the exercise tracks: a rep range (+ AMRAP), time, distance (mi); no weight (see modesOf).
+// Weight/time/distance are kept as text and parsed on save; time accepts "1:30" or "130".
 //
 // Autofill: the first value typed into a column (min, max, weight, time, distance) is mirrored into
 // that column on the exercise's other sets as you type (rep columns skip AMRAP sets). Once that field
@@ -166,7 +175,7 @@ const FIELDS = ["min", "max", "weight", "time", "distance"] as const;
 const TEXT_FIELDS = ["weight", "time", "distance"];
 type Field = (typeof FIELDS)[number];
 type EditSet = { min: number | null; max: number | null; amrap: boolean; weight: string | null; time: string | null; distance: string | null };
-type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<Field, boolean> };
+type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<Field, boolean>; lx?: number };
 
 function mountBuilder(
   root: HTMLElement, signal: AbortSignal, options: PickerOption[], initial: Item[], draftKey: string,
@@ -184,7 +193,7 @@ function mountBuilder(
     }));
     // Loaded workouts (edit / failed save): a column that already has values counts as filled.
     const filled = Object.fromEntries(FIELDS.map((f) => [f, sets.some((st) => st[f] != null)])) as Record<Field, boolean>;
-    return { exercise_id: it.exercise_id, superset_next: it.superset_next, sets, filled };
+    return { exercise_id: it.exercise_id, superset_next: it.superset_next, sets, filled, lx: it.lx };
   });
 
   const list = root.querySelector<HTMLElement>("#builder-list")!;
@@ -193,12 +202,13 @@ function mountBuilder(
   const picker = root.querySelector<HTMLDialogElement>("#picker")!;
   const esc = (s: unknown) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-  const modesOf = (item: EditItem) => byId.get(item.exercise_id)!.modes;
+  // Weight isn't planned here (user requirement, 2026-10-13): the builder edits rep ranges, time and
+  // distance only. Weight targets already saved are kept as they are.
+  const modesOf = (item: EditItem) => byId.get(item.exercise_id)!.modes.filter((m) => m !== "weight");
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
   // One grid column per tracked mode, in TRACKING_MODES order (like the day view).
   const COLUMNS: Record<string, { tracks: string; heads: string[] }> = {
-    weight: { tracks: "minmax(0, 1fr)", heads: ["lb"] },
     reps: { tracks: "minmax(0, 2fr) auto", heads: ["Reps", ""] },
     time: { tracks: "minmax(0, 1fr)", heads: ["Time"] },
     distance: { tracks: "minmax(0, 1fr)", heads: ["mi"] },
@@ -215,7 +225,6 @@ function mountBuilder(
 
   function setRow(item: EditItem, i: number, set: EditSet, s: number) {
     const cells = modesOf(item).map((m) => {
-      if (m === "weight") return textInput("weight", i, s, set, { inputmode: "decimal", label: "weight in pounds" });
       if (m === "time") return textInput("time", i, s, set, { inputmode: "numeric", label: "time", placeholder: "m:ss", invalid: timeInvalid(set) });
       if (m === "distance") return textInput("distance", i, s, set, { inputmode: "decimal", label: "distance in miles" });
       const bad = rangeInvalid(set) ? " invalid" : "";
@@ -247,7 +256,7 @@ function mountBuilder(
     if (i > 0 && items[i - 1].superset_next) classes.push("linked-above");
     if (item.superset_next) classes.push("linked-below");
     const badges = ex.modes.map((m) => `<span class="badge">${cap(m)}</span>`).join("");
-    const heads = ["Set", ...ex.modes.flatMap((m) => COLUMNS[m].heads), ""];
+    const heads = ["Set", ...modesOf(item).flatMap((m) => COLUMNS[m].heads), ""];
     return `<li class="${classes.join(" ")}">
       <div class="wx-head">
         <div class="wx-title"><h3>${esc(ex.name)}</h3><div class="badges">${badges}</div></div>

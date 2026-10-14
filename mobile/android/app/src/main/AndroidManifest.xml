@@ -24,6 +24,9 @@
 
         </activity>
 
+        <!-- End of a rest (RestTimerPlugin) -->
+        <receiver android:name=".RestAlarmReceiver" android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -2,9 +2,11 @@
 // Flask database at Alembic head 0005 column-for-column (so backups transfer one-to-one),
 // plus what a fresh schema allows: ON DELETE CASCADE / SET NULL instead of Python-side
 // cascades, and >= 0 checks on the target columns. Never edit a shipped migration; append.
+import { groupLogWorkouts } from "../logic/dayWorkouts";
 import type { Db } from "./types";
 
-export const MIGRATIONS: string[] = [
+/** SQL, or a function for migrations that also move data. */
+export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
   // 1: initial schema (Flask/Alembic 0005)
   `
   CREATE TABLE muscle_group (
@@ -131,6 +133,23 @@ export const MIGRATIONS: string[] = [
     date DATE PRIMARY KEY
   );
   `,
+  // 4: workouts on the day screen (user, 2026-10-14; agent-notes/day-workouts.md). Not in Flask.
+  // Each loaded workout is a log_workout with its own times; existing history is grouped into them.
+  async (db) => {
+    await db.exec(`
+      CREATE TABLE log_workout (
+        id INTEGER PRIMARY KEY,
+        date DATE NOT NULL,
+        workout_id INTEGER REFERENCES workout (id) ON DELETE SET NULL,
+        name VARCHAR(100) NOT NULL,
+        started_at DATETIME,
+        ended_at DATETIME
+      );
+      CREATE INDEX ix_log_workout_date ON log_workout (date);
+      ALTER TABLE log_exercise ADD COLUMN log_workout_id INTEGER REFERENCES log_workout (id) ON DELETE SET NULL;
+    `);
+    await groupLogWorkouts(db);
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -143,7 +162,9 @@ export async function migrate(db: Db): Promise<number> {
   }
   for (let v = start; v < SCHEMA_VERSION; v++) {
     await db.transaction(async () => {
-      await db.exec(MIGRATIONS[v]);
+      const m = MIGRATIONS[v];
+      if (typeof m === "string") await db.exec(m);
+      else await m(db);
       await db.exec(`PRAGMA user_version = ${v + 1}`);
     });
   }
@@ -154,5 +175,5 @@ export async function migrate(db: Db): Promise<number> {
 export const TABLES = [
   "muscle_group", "exercise", "exercise_muscle", "workout", "workout_exercise", "workout_set",
   "routine", "routine_workout", "routine_muscle_target", "target_preset", "target_preset_value", "progress_target",
-  "log_exercise", "log_set", "deload_day",
+  "log_workout", "log_exercise", "log_set", "deload_day",
 ] as const;

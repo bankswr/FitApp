@@ -1,7 +1,7 @@
 // Phone-only features via Capacitor plugins. In a desktop browser each function falls back
 // to the web behaviour or does nothing, so callers never need to check the platform.
 import { App } from "@capacitor/app";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import { Haptics, ImpactStyle } from "@capacitor/haptics";
 import { LocalNotifications } from "@capacitor/local-notifications";
@@ -79,36 +79,29 @@ export function alarmHaptic() {
   else navigator.vibrate?.([200, 100, 200, 100, 200]);
 }
 
-// ---------- rest timer notification ----------
-// Scheduled only while the app is in the background (a phone can't run the in-app alarm then)
-// and cancelled when it comes back, so the in-app alarm and the notification never both fire.
-const REST_NOTIFICATION = 1;
+// ---------- rest timer on the phone (android/.../RestTimerPlugin.java) ----------
+// While a countdown runs, a notification shows it (status bar and lock screen), and an alarm
+// at the end sounds even when the phone is asleep. Set up when the countdown starts, not when
+// the app goes to the background: JS can be paused before a call made then gets through.
+const RestTimer = registerPlugin<{ start(o: { endsAt: number }): Promise<void>; stop(): Promise<void> }>("RestTimer");
 
-export async function scheduleRestAlarm(endsAt: number): Promise<void> {
+/** Show the countdown and set the end alarm (replacing any earlier one). */
+export async function showRestTimer(endsAt: number): Promise<void> {
   if (!isNative || endsAt <= Date.now()) return;
   try {
-    let { display } = await LocalNotifications.checkPermissions();
-    if (display === "prompt" || display === "prompt-with-rationale") ({ display } = await LocalNotifications.requestPermissions());
-    if (display !== "granted") return;
-    await LocalNotifications.schedule({
-      notifications: [{
-        id: REST_NOTIFICATION,
-        title: "Rest over",
-        body: "Time for your next set.",
-        schedule: { at: new Date(endsAt), allowWhileIdle: true },
-      }],
-    });
+    await RestTimer.start({ endsAt });
   } catch (e) {
-    console.warn("Couldn't schedule the rest alarm", e);
+    console.warn("Couldn't set the rest alarm", e);
   }
 }
 
-export async function cancelRestAlarm(): Promise<void> {
+/** Remove the countdown, the alarm and any "Rest over" alert. */
+export async function clearRestTimer(): Promise<void> {
   if (!isNative) return;
   try {
-    await LocalNotifications.cancel({ notifications: [{ id: REST_NOTIFICATION }] });
+    await RestTimer.stop();
   } catch {
-    /* nothing scheduled */
+    /* nothing running */
   }
 }
 

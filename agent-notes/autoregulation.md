@@ -1,7 +1,7 @@
 # Autoregulation
 How autoregulation sets rep and weight targets from the previous session, and how deload days fit in. Mobile app only (`mobile/src/logic/autoregulation.ts`), not in Flask.
 
-Last updated: 2026-10-10
+Last updated: 2026-10-14
 
 ## Rules (user requirement, 2026-10-04)
 - **One switch in Settings (user requirement, 2026-10-10):** **Autoregulation** on the Settings screen, per device (`fitapp.autoregulate` in localStorage via `ui/prefs.ts`, off by default). The day view passes it to `loadRoutine` / `loadWorkout` / `addExercises` as an `autoregulate` argument (default false, so the logic stays Flask-parity when off). It replaced the per-routine checkbox: `routine.autoregulate` is still stored, imported and exported, and kept through edits by a hidden field in the routine editor, but nothing reads it.
@@ -23,8 +23,11 @@ Last updated: 2026-10-10
 - **Completed sets are skipped, and so is each target whose field already has a value** (user requirement): a typed weight keeps that set's weight target, but its reps target still updates.
 - The range is the set's own target range, 8–15 when it has none (an ad-hoc exercise). Sets past the reference's count keep their targets. No earlier entry → nothing changes and a toast says so. Works on any day, whether or not the Settings switch is on, and **replaces** existing targets (e.g. ones a workout's autoregulation set) with the exercise-based ones (user requirement).
 
+## Checking off a blank set (user requirement, 2026-10-13)
+- ✓ on a set fills each **empty** field with the number its placeholder shows, before saving (`targetValues` / `setTargetValues` in `logic/day.ts`, called from the day view's check handler). Typed values win. Reps fill only when the placeholder (`target_label`) is a plain number: `target_reps` (autoregulated AMRAP sets included) or a fixed range like 5–5; "8–12", "8+" or a plain "AMRAP" fill nothing. Weight, time and distance targets fill as they are. Applies to every set, autoregulated or not. Done in the UI, so `updateSet` stays Flask-parity.
+
 ## Which session is the reference
-- The latest **non-deload** date before the load date on which that workout was logged, from **any source** (`log_exercise.workout_id`).
+- The workout's latest **non-deload** session before the load date, from **any source**: a `log_workout` row (schema 4, see `day-workouts.md`; before that, `log_exercise.workout_id` by date). When it was done twice on one day, the later one.
 - No such date → the first use; the plan is loaded unchanged, even if the exercises have history elsewhere.
 - Exercises are matched to the plan's slots **by exercise, in order** (the first copy of an exercise matches the first copy), so rearranging the workout still lines up. Duplicate exercises in one workout are rare (user).
 - A slot whose exercise wasn't in that session (a **replaced** exercise) falls back to that exercise's latest earlier non-deload entry from any source (user requirement). No history → plan targets.

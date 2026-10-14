@@ -5,11 +5,14 @@ import { html, render } from "lit-html";
 import { isDeload, repRange, setDeload } from "../../logic/autoregulation";
 import * as day from "../../logic/day";
 import { type LogEntry, type LogSet } from "../../logic/day";
+import * as dw from "../../logic/dayWorkouts";
+import { type DayWorkout } from "../../logic/dayWorkouts";
+import { utcNow } from "../../db/types";
 import { exercisePickerData, getExercise, type PickerOption } from "../../logic/exercises";
 import { exerciseHistory } from "../../logic/history";
 import { listRoutines, routineNextIndex } from "../../logic/routines";
 import {
-  addDays, dayTitle, formatDuration, formatNumber, historyDate, NOTE_MAX_LENGTH, parseIsoDate, type TrackingMode,
+  addDays, dayTitle, formatDuration, formatNumber, formatVolume, historyDate, NOTE_MAX_LENGTH, parseIsoDate, type TrackingMode,
 } from "../../logic/text";
 import { groupBlocks, listWorkouts } from "../../logic/workouts";
 import { type Ctx, currentPath, flash, href, navigate, refresh, route } from "../app";
@@ -20,7 +23,7 @@ import { historyList } from "./history";
 import { tapHaptic } from "../native";
 import { autoregulateOn, quickFillOn } from "../prefs";
 import { takeCreatedExercises } from "./exercises";
-import { mountRestTimer, restTimerBar } from "./restTimer";
+import { mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
 
 // How each tracking mode appears as a column.
 const FIELDS: Record<TrackingMode, { field: keyof LogSet; label: string; inputmode: string }> = {
@@ -40,7 +43,9 @@ async function dayView(ctx: Ctx, date: string) {
   if (!parseIsoDate(date)) throw new Error("That isn’t a valid date.");
   const { db, today } = ctx;
   const isToday = date === today;
+  await dw.finishStaleWorkouts(db, new Date(), restSeconds()); // forgotten Finish (agent-notes/day-workouts.md)
   const entries = await day.dayEntries(db, date);
+  const dayWorkouts = await dw.listDayWorkouts(db, date);
   const deload = await isDeload(db, date);
   const blocks = groupBlocks(entries);
   const restAfter = day.restAfterSets(blocks);
@@ -64,6 +69,13 @@ async function dayView(ctx: Ctx, date: string) {
     ctx.onDelete(`entry:${lx.id}`, async () => {
       const name = await day.deleteLogEntry(db, lx.id);
       flash(`Removed “${name}” from this day.`);
+      await refresh();
+    });
+  }
+  for (const w of dayWorkouts) {
+    ctx.onDelete(`lw:${w.id}`, async () => {
+      const name = await dw.deleteDayWorkout(db, w.id);
+      flash(`Removed workout “${name}”.`);
       await refresh();
     });
   }
@@ -99,10 +111,10 @@ async function dayView(ctx: Ctx, date: string) {
     </div>`;
 
   // Superset toggle (user requirement): links this exercise with the one below it. Every card
-  // but the day's last has one; it's pressed while the two are in the same superset.
+  // but the day's last (and a workout's last) has one; it's pressed while the two are in the same superset.
   const supersetButton = (lx: LogEntry) => {
     const next = entries[entries.indexOf(lx) + 1];
-    if (!next) return "";
+    if (!next || next.log_workout_id !== lx.log_workout_id) return "";
     const linked = lx.superset_group !== null && lx.superset_group === next.superset_group;
     return html`<button type="button" class="button subtle small superset-btn" data-superset=${lx.id} aria-pressed=${linked ? "true" : "false"}
       aria-label=${linked ? `Unlink ${lx.exercise.name} from ${next.exercise.name}` : `Superset ${lx.exercise.name} with ${next.exercise.name}`}
@@ -117,7 +129,7 @@ async function dayView(ctx: Ctx, date: string) {
       const { min, max } = repRange({ reps_min: x.target_reps_min, reps_max: x.target_reps_max });
       return `${min}–${max}`;
     }))];
-    return ranges.length ? html`<span class="rep-range">${ranges.join(" · ")}</span>` : "";
+    return ranges.length ? html`<span class="range-note">${ranges.join(" · ")}</span>` : "";
   };
 
   const card = (lx: LogEntry) => html`
@@ -126,7 +138,7 @@ async function dayView(ctx: Ctx, date: string) {
         <div>
           <h2><button type="button" class="log-name" data-history=${lx.exercise.id} data-name=${lx.exercise.name} data-drag-ok
                       aria-haspopup="dialog" title="Show history">${lx.exercise.name}</button></h2>
-          ${lx.workout_name ? html`<span class="log-source">${lx.workout_name}</span>` : ""}
+          ${lx.workout_name && lx.log_workout_id === null ? html`<span class="log-source">${lx.workout_name}</span>` : ""}
         </div>
         <div class="log-head-actions">
           ${lx.exercise.tracks.reps ? html`
@@ -161,6 +173,43 @@ async function dayView(ctx: Ctx, date: string) {
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+  // Workouts on the day (agent-notes/day-workouts.md): consecutive blocks of one log_workout are
+  // framed together under a one-line header. Exercises outside any workout sit between them.
+  const byId = new Map(dayWorkouts.map((w) => [w.id, w]));
+  const segments: { w: DayWorkout | null; blocks: LogEntry[][] }[] = [];
+  for (const block of blocks) {
+    const id = block[0].log_workout_id;
+    const last = segments.at(-1);
+    if (id !== null && last?.w?.id === id) last.blocks.push(block);
+    else segments.push({ w: id === null ? null : byId.get(id)!, blocks: [block] });
+  }
+  const blockHtml = (block: LogEntry[]) => html`
+    <div class="log-block${block.length > 1 ? " superset" : ""}" data-block>
+      ${block.length > 1 ? html`<span class="superset-tag">Superset</span>` : ""}
+      ${block.map(card)}
+    </div>`;
+  // Start / Finish / Resume only on today: times are never recorded for other days (user).
+  const wbAction = (w: DayWorkout) => {
+    if (!isToday) return "";
+    const [act, label] = w.ended_at ? ["resume", "Resume"] : w.started_at ? ["finish", "Finish"] : ["start", "Start"];
+    return html`<button type="button" class="button subtle small" data-wb-act=${act} data-wb=${w.id}
+      aria-label="${label} ${w.name}">${label}</button>`;
+  };
+  const workoutBlock = (w: DayWorkout, inner: LogEntry[][]) => html`
+    <section class="wblock" data-wblock=${w.id} aria-label="Workout ${w.name}">
+      <div class="wb-head">
+        <button type="button" class="wb-title" data-wb-times=${w.id} data-drag-ok aria-haspopup="dialog"
+                title="Edit times">${w.name}</button>
+        <span class="wb-stats" data-wb-stats=${w.id}></span>
+        ${wbAction(w)}
+        <button type="button" class="icon-btn danger" aria-label="Remove workout ${w.name}"
+                data-confirm-delete="lw:${w.id}" data-name=${w.name}
+                data-detail="Removes its sets that aren’t checked off. Exercises with checked-off sets stay on this day, outside any workout.">&times;</button>
+      </div>
+      ${inner.map(blockHtml)}
+      <div class="wb-end" aria-hidden="true"></div>
+    </section>`;
+
   return {
     title,
     section: "day" as const,
@@ -181,13 +230,9 @@ async function dayView(ctx: Ctx, date: string) {
           ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
         </div>
         ${blocks.length ? html`
-          ${blocks.length > 1 ? html`<p class="hint reorder-hint">Long-press an exercise to drag it into a new order.</p>` : ""}
+          ${blocks.length > 1 ? html`<p class="hint reorder-hint">Long-press an exercise, or a workout’s name, to drag it.</p>` : ""}
           <div class="log-list" id="log-list">
-            ${blocks.map((block) => html`
-              <div class="log-block${block.length > 1 ? " superset" : ""}" data-block>
-                ${block.length > 1 ? html`<span class="superset-tag">Superset</span>` : ""}
-                ${block.map(card)}
-              </div>`)}
+            ${segments.map((seg) => (seg.w ? workoutBlock(seg.w, seg.blocks) : seg.blocks.map(blockHtml)))}
           </div>` : html`
           <p class="empty">Nothing logged ${isToday ? "today" : "on this day"}.<br>Tap <strong>+ Add</strong> for a routine, workout or exercises.</p>`}
         <div class="day-actions">
@@ -282,6 +327,21 @@ async function dayView(ctx: Ctx, date: string) {
         </form>
       </dialog>
 
+      <dialog class="sheet times-sheet" id="times-sheet" aria-labelledby="times-sheet-title">
+        <div class="sheet-head">
+          <h2 id="times-sheet-title"></h2>
+          <button type="button" class="button subtle" data-close>Cancel</button>
+        </div>
+        <form class="form" id="times-form" novalidate>
+          <div class="times-row">
+            <div class="field"><label for="wt-start">Start</label><input type="time" id="wt-start"></div>
+            <div class="field"><label for="wt-end">Finish</label><input type="time" id="wt-end"></div>
+          </div>
+          <p class="hint">Blank means unknown and is left out of stats. A finish earlier than the start is the next day.</p>
+          <button type="submit" class="button block">Save times</button>
+        </form>
+      </dialog>
+
       <dialog class="sheet history-sheet" id="history-sheet" aria-labelledby="history-sheet-title">
         <div class="sheet-head">
           <div>
@@ -311,7 +371,9 @@ async function dayView(ctx: Ctx, date: string) {
       <div class="toast" id="toast" role="status" hidden></div>`,
     mount(root: HTMLElement, signal: AbortSignal) {
       const timer = mountRestTimer(root, signal);
-      mountDay(root, signal, ctx, { date, prev, next, options, summaries, onSetCompleted: timer.onSetCompleted, onDayFinished: timer.onDayFinished });
+      mountDay(root, signal, ctx, {
+        date, prev, next, options, summaries, isToday, dayWorkouts, onSetCompleted: timer.onSetCompleted, onDayFinished: timer.onDayFinished,
+      });
     },
   };
 }
@@ -328,7 +390,10 @@ type Summaries = Record<number, { name: string; blocks: { name: string; sets: nu
 
 function mountDay(
   root: HTMLElement, signal: AbortSignal, ctx: Ctx,
-  o: { date: string; prev: string; next: string; options: PickerOption[]; summaries: Summaries; onSetCompleted: () => void; onDayFinished: () => void },
+  o: {
+    date: string; prev: string; next: string; options: PickerOption[]; summaries: Summaries; isToday: boolean;
+    dayWorkouts: DayWorkout[]; onSetCompleted: () => void; onDayFinished: () => void;
+  },
 ) {
   const { db } = ctx;
   const dayEl = root.querySelector<HTMLElement>("#day")!;
@@ -346,6 +411,89 @@ function mountDay(
     toastTimer = window.setTimeout(() => (toastEl.hidden = true), 3500);
   }
   signal.addEventListener("abort", () => clearTimeout(toastTimer));
+
+  // ---------- workouts on the day: header stats, Start / Finish / Resume, times ----------
+  const workouts = new Map(o.dayWorkouts.map((w) => [w.id, w]));
+  const span = (ms: number) => {
+    const min = Math.floor(ms / 60_000);
+    return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
+  };
+  function showStats(w: DayWorkout) {
+    const el = dayEl.querySelector<HTMLElement>(`[data-wb-stats="${w.id}"]`);
+    if (!el) return;
+    const parts: string[] = [];
+    if (w.started_at && w.ended_at) parts.push(span(dw.parseUtc(w.ended_at).getTime() - dw.parseUtc(w.started_at).getTime()));
+    else if (w.started_at) parts.push(span(Date.now() - dw.parseUtc(w.started_at).getTime()));
+    if (w.volume) parts.push(`${formatVolume(w.volume)} lb`);
+    el.textContent = parts.join(" · ");
+    el.classList.toggle("running", dw.inProgress(w));
+  }
+  async function updateStats(id: number) {
+    try {
+      const w = await dw.getDayWorkout(db, id);
+      workouts.set(id, w);
+      showStats(w);
+    } catch {
+      /* removed meanwhile */
+    }
+  }
+  workouts.forEach(showStats);
+  const ticker = window.setInterval(() => workouts.forEach((w) => dw.inProgress(w) && showStats(w)), 30_000);
+  signal.addEventListener("abort", () => clearInterval(ticker));
+  const workoutOf = (el: Element) => {
+    const id = el.closest<HTMLElement>("[data-wblock]")?.dataset.wblock;
+    return id ? Number(id) : null;
+  };
+
+  on(dayEl, "click", async (e: Event) => {
+    const btn = (e.target as Element).closest<HTMLButtonElement>("[data-wb-act]");
+    if (!btn) return;
+    const id = Number(btn.dataset.wb);
+    btn.disabled = true;
+    try {
+      if (btn.dataset.wbAct === "start") await dw.startDayWorkout(db, id, new Date(), restSeconds());
+      else if (btn.dataset.wbAct === "resume") await dw.resumeDayWorkout(db, id, restSeconds());
+      else {
+        await dw.finishDayWorkout(db, id, new Date());
+        o.onDayFinished(); // no rest needed after the last set (user)
+      }
+      await refresh();
+    } catch (err) {
+      btn.disabled = false;
+      toast((err as Error).message);
+    }
+  });
+
+  // Tapping a workout's name edits its times (any day). Local HH:MM on the workout's date.
+  const timesSheet = root.querySelector<HTMLDialogElement>("#times-sheet")!;
+  const timesForm = root.querySelector<HTMLFormElement>("#times-form")!;
+  const startIn = root.querySelector<HTMLInputElement>("#wt-start")!;
+  const endIn = root.querySelector<HTMLInputElement>("#wt-end")!;
+  let timesFor: number | null = null;
+  const hhmm = (s: string | null) => (s ? dw.parseUtc(s).toTimeString().slice(0, 5) : "");
+  on(dayEl, "click", (e: Event) => {
+    const btn = (e.target as Element).closest<HTMLElement>("[data-wb-times]");
+    if (!btn) return;
+    const w = workouts.get(Number(btn.dataset.wbTimes))!;
+    timesFor = w.id;
+    root.querySelector("#times-sheet-title")!.textContent = w.name;
+    startIn.value = hhmm(w.started_at);
+    endIn.value = hhmm(w.ended_at);
+    timesSheet.showModal();
+  });
+  on(timesForm, "submit", async (e: Event) => {
+    e.preventDefault();
+    const start = startIn.value ? new Date(`${o.date}T${startIn.value}`) : null;
+    let end = endIn.value ? new Date(`${o.date}T${endIn.value}`) : null;
+    if (start && end && end < start) end = new Date(end.getTime() + 86_400_000); // past midnight
+    try {
+      await dw.setDayWorkoutTimes(db, timesFor!, start && utcNow(start), end && utcNow(end), ctx.today, restSeconds());
+      timesSheet.close();
+      await refresh();
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  });
 
   // ---------- set fields: autosave on change; ✓ saves the whole row ----------
 
@@ -390,6 +538,8 @@ function mountDay(
       const data = await day.updateSet(db, Number(row.dataset.set), { [input.dataset.field!]: value });
       showField(input, (data as any)[input.dataset.field!]);
       input.classList.remove("invalid");
+      const w = workoutOf(row);
+      if (w !== null && data.completed) void updateStats(w);
     } catch (err) {
       input.classList.add("invalid");
       toast((err as Error).message);
@@ -457,8 +607,12 @@ function mountDay(
     const row = check.closest<HTMLElement>("[data-set]")!;
     const completed = check.getAttribute("aria-pressed") !== "true";
     const body: Record<string, unknown> = { completed };
+    // Checking off fills each empty field with its target, when it has one (user requirement).
     try {
-      for (const input of row.querySelectorAll<HTMLInputElement>("input[data-field]")) body[input.dataset.field!] = readField(input);
+      const targets = completed ? await day.setTargetValues(db, Number(row.dataset.set)) : {};
+      for (const input of row.querySelectorAll<HTMLInputElement>("input[data-field]")) {
+        body[input.dataset.field!] = readField(input) ?? targets[input.dataset.field!] ?? null;
+      }
     } catch (err) {
       return toast((err as Error).message);
     }
@@ -469,6 +623,13 @@ function mountDay(
       if (data.completed) tapHaptic();
       if (data.completed && !dayEl.querySelector("[data-set]:not(.done)")) o.onDayFinished();
       else if (data.completed && row.dataset.rest === "1") o.onSetCompleted();
+      // The first ✓ of a workout today starts it (and finishes the one in progress).
+      const w = workoutOf(row);
+      if (w !== null) {
+        const lxId = Number(row.closest<HTMLElement>("[data-lx]")!.dataset.lx);
+        if (data.completed && o.isToday && await dw.noteCheckOff(db, lxId, restSeconds())) return await refresh();
+        void updateStats(w);
+      }
     } catch (err) {
       toast((err as Error).message);
     } finally {
@@ -527,6 +688,8 @@ function mountDay(
 
   // "+ Add": Routines / Workouts / Exercises tabs. Routines and workouts expand to a preview with
   // a Load button; exercises are multi-select, added in pick order.
+  wireSheet(root.querySelector<HTMLDialogElement>("#times-sheet")!);
+
   const addSheet = root.querySelector<HTMLDialogElement>("#add-sheet")!;
   const tabs = [...addSheet.querySelectorAll<HTMLElement>("[data-tab]")];
   const TAB_KEY = "fitapp.addTab";
@@ -675,7 +838,7 @@ function mountDay(
     on(exAdd, "click", async () => {
       exAdd.disabled = true;
       try {
-        await day.addExercises(db, o.date, [...selected], autoregulateOn());
+        await day.addExercises(db, o.date, [...selected], autoregulateOn(), true); // join the workout in progress
         addSheet.close();
         await refresh();
       } catch (err) {
@@ -764,40 +927,69 @@ function mountDay(
     }
   });
 
-  // ---------- long-press to reorder (ui/dragReorder.ts) ----------
-  // A superset moves as one block. While dragging, every card collapses to its name (user
-  // requirement) so blocks are short and easy to move; they expand again on drop.
+  // ---------- long-press to drag (ui/dragReorder.ts) ----------
+  // Two modes on one list (agent-notes/day-workouts.md). A workout's header lifts the whole
+  // workout; an exercise (a superset moves as one block) moves among every exercise, header and
+  // workout end, and belongs to the workout whose header is above it, or to none past its end.
+  // While dragging, every card collapses to its name (user requirement); the page then re-renders.
   const logList = root.querySelector<HTMLElement>("#log-list");
   let touch: { x: number; y: number; t: number } | null = null;
-  async function saveOrder() {
-    const ids = [...logList!.querySelectorAll<HTMLElement>(".log-card")].map((c) => Number(c.dataset.lx));
+  const cardsOf = (el: Element) => [...el.querySelectorAll<HTMLElement>(".log-card")].map((c) => Number(c.dataset.lx));
+  async function saveLayout(layout: { id: number; w: number | null }[]) {
     try {
-      await day.reorderDay(db, o.date, ids);
+      await dw.arrangeDay(db, o.date, layout);
     } catch (err) {
       toast((err as Error).message);
-      setTimeout(() => void refresh(), 1500);
     }
+    await refresh();
   }
-  const reorder = logList ? longPressReorder(logList, {
-    signal,
-    items: () => [...logList.querySelectorAll<HTMLElement>(":scope > [data-block]")],
-    bottomInset: 72, // the rest timer bar and tab bar
-    onLift() {
-      touch = null; // cancel any day swipe in progress
-      dayEl.style.transform = "";
-      logList.classList.add("collapsed");
-    },
-    onDrop(from, to, block) {
-      const blocks = [...logList.querySelectorAll<HTMLElement>(":scope > [data-block]")];
-      if (to > from) blocks[to].after(block);
-      else if (to < from) blocks[to].before(block);
-      // Expand the cards again, keeping the dropped block where it is on screen.
-      const before = block.getBoundingClientRect().top;
-      logList.classList.remove("collapsed");
-      scrollBy(0, block.getBoundingClientRect().top - before);
-      if (to !== from) void saveOrder();
-    },
-  }) : null;
+  const moved = <T>(list: T[], from: number, to: number) => {
+    const out = [...list];
+    out.splice(to, 0, ...out.splice(from, 1));
+    return out;
+  };
+  const lift = () => {
+    touch = null; // cancel any day swipe in progress
+    dayEl.style.transform = "";
+    logList!.classList.add("collapsed");
+  };
+  const settle = () => logList!.classList.remove("collapsed");
+  const topLevel = () => [...logList!.children] as HTMLElement[];
+  const flat = () => topLevel().flatMap((c) => (c.matches("[data-wblock]")
+    ? [...c.querySelectorAll<HTMLElement>(":scope > .wb-head, :scope > [data-block], :scope > .wb-end")]
+    : [c]));
+  const reorders = logList ? [
+    longPressReorder(logList, {
+      signal,
+      items: flat,
+      canLift: (_t, item) => item.matches("[data-block]"),
+      bottomInset: 72, // the rest timer bar and tab bar
+      onLift: lift,
+      onDrop(from, to) {
+        if (to === from) return settle();
+        const layout: { id: number; w: number | null }[] = [];
+        let current: number | null = null;
+        for (const el of moved(flat(), from, to)) {
+          if (el.matches(".wb-head")) current = workoutOf(el);
+          else if (el.matches(".wb-end")) current = null;
+          else for (const id of cardsOf(el)) layout.push({ id, w: current });
+        }
+        void saveLayout(layout);
+      },
+    }),
+    longPressReorder(logList, {
+      signal,
+      items: topLevel,
+      canLift: (t, item) => item.matches("[data-wblock]") && !!t.closest(".wb-head"),
+      bottomInset: 72,
+      onLift: lift,
+      onDrop(from, to) {
+        if (to === from) return settle();
+        void saveLayout(moved(topLevel(), from, to).flatMap((el) => cardsOf(el).map((id) => ({ id, w: workoutOf(el) }))));
+      },
+    }),
+  ] : [];
+  const reorder = { isDragging: () => reorders.some((r) => r.isDragging()) };
 
   // ---------- calendar ----------
   const calSheet = root.querySelector<HTMLDialogElement>("#calendar-sheet")!;

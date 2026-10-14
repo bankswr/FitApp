@@ -52,8 +52,14 @@ const MOBILE_ONLY_COLUMNS: Record<string, Record<string, unknown>> = {
   log_set: { target_reps: null },
 };
 
+// Mobile-only data derived from what Flask has (schema 4: workouts on the day), left out of comparisons.
+export const MOBILE_ONLY_TABLES = new Set(["log_workout"]);
+const DERIVED_COLUMNS: Record<string, string[]> = { log_exercise: ["log_workout_id"] };
+
 /** Rows with mobile-only columns dropped when they hold their default, for comparing with Flask data. */
 export function asFlaskRows(table: string, rows: Row[]): Row[] {
+  const derived = DERIVED_COLUMNS[table];
+  if (derived) rows = rows.map((row) => Object.fromEntries(Object.entries(row).filter(([k]) => !derived.includes(k))));
   const extra = MOBILE_ONLY_COLUMNS[table];
   if (!extra) return rows;
   return rows.map((row) => Object.fromEntries(Object.entries(row).filter(([k, v]) => !(k in extra && extra[k] === v))));

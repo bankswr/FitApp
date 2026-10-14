@@ -22,6 +22,8 @@ export interface ReorderOptions {
   onDrop: (from: number, to: number, item: HTMLElement) => void;
   /** Extra space at the bottom of the screen not to drag under (e.g. a fixed timer bar). */
   bottomInset?: number;
+  /** Whether a press on `target` may lift `item` (default: any). Items that can't be lifted still make way. */
+  canLift?: (target: Element, item: HTMLElement) => boolean;
 }
 
 type Drag = {
@@ -121,7 +123,7 @@ export function longPressReorder(list: HTMLElement, o: ReorderOptions) {
   on(list, "pointerdown", (e: PointerEvent) => {
     if (drag || !e.isPrimary || e.button !== 0 || (e.target as Element).closest("input, button:not([data-drag-ok]), a, label")) return;
     const item = o.items().find((it) => it.contains(e.target as Node));
-    if (!item) return;
+    if (!item || (o.canLift && !o.canLift(e.target as Element, item))) return;
     cancelPress();
     press = { item, x: e.clientX, y: e.clientY, timer: window.setTimeout(startDrag, LONG_PRESS_MS) };
   });

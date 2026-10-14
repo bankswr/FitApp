@@ -15,7 +15,7 @@ import { progressData, progressRange } from "../src/logic/progress";
 import { deleteRoutine, getRoutine, routineNextIndex, saveRoutine } from "../src/logic/routines";
 import { formatVolume, monthBefore, truncate1, ValidationError } from "../src/logic/text";
 import { deleteWorkout, groupBlocks, listWorkouts, saveWorkout, slotSummary, workoutDeleteBlocker } from "../src/logic/workouts";
-import { asFlaskRows, openTestDb } from "./sqljs";
+import { asFlaskRows, MOBILE_ONLY_TABLES, openTestDb } from "./sqljs";
 
 const fixture = (name: string) => new URL(`./fixtures/${name}`, import.meta.url);
 const ready = existsSync(fixture("scenario-start.json")) && existsSync(fixture("scenario-expected.json"));
@@ -186,6 +186,14 @@ async function dump(db: Db) {
   return out;
 }
 
+// Steps where mobile deliberately differs from Flask, with mobile's expected result.
+const DIVERGES: Record<number, unknown> = {
+  // Arms Day is loaded twice on 2036-01-05 (steps 26 and 32). Each load is its own workout on mobile
+  // (log_workout, agent-notes/day-workouts.md), so the later Arms Day is the most recent and the
+  // rotation continues after slot 3 (index 0 next); Flask merges them into one.
+  57: [2, 0, 1, 2, 2],
+};
+
 it.skipIf(!ready)("replays the Flask scenario with identical results and final data", async () => {
   const start = JSON.parse(readFileSync(fixture("scenario-start.json"), "utf8"));
   const expected = JSON.parse(readFileSync(fixture("scenario-expected.json"), "utf8"));
@@ -194,9 +202,11 @@ it.skipIf(!ready)("replays the Flask scenario with identical results and final d
   await migrate(db);
   await importBackup(db, start);
   for (const [i, step] of steps.entries()) {
-    const [want, got] = normalize(expected.results[i], await run(db, step, expected.today));
+    const [want, got] = normalize(DIVERGES[i] ?? expected.results[i], await run(db, step, expected.today));
     expect(got, `step ${i}: ${step.op}`).toEqual(want);
   }
   const final = await dump(db);
-  for (const table of TABLES) expect(asFlaskRows(table, final[table]), `final ${table}`).toEqual(expected.final[table] ?? []);
+  for (const table of TABLES) {
+    if (!MOBILE_ONLY_TABLES.has(table)) expect(asFlaskRows(table, final[table]), `final ${table}`).toEqual(expected.final[table] ?? []);
+  }
 });
