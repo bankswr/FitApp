@@ -723,7 +723,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   align-items: center;
   padding: 6px;
   border-radius: 999px;
-  border: 1px solid var(--surface-2); /* stands out from the cards behind it (user requirement) */
+  border: 2px solid var(--blue); /* stands out from the cards behind it (user requirement) */
   background: var(--surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
   z-index: 9;
