@@ -39,3 +39,26 @@ export function setAutoregulate(on: boolean) {
     /* storage unavailable: the setting lasts until the app reloads */
   }
 }
+
+const COLLAPSED = "fitapp.collapsedEntries";
+const COLLAPSED_KEEP = 500; // log_entry ids are never reused, so only the newest few matter
+
+/** Day-view exercise cards (log_entry ids) collapsed to their name (user requirement, 2026-10-15). */
+export function collapsedEntries(): Set<number> {
+  try {
+    const ids = JSON.parse(localStorage.getItem(COLLAPSED) ?? "[]");
+    return new Set(Array.isArray(ids) ? ids.filter(Number.isInteger) : []);
+  } catch {
+    return new Set();
+  }
+}
+export function setEntryCollapsed(id: number, collapsed: boolean) {
+  const ids = collapsedEntries();
+  ids.delete(id);
+  if (collapsed) ids.add(id);
+  try {
+    localStorage.setItem(COLLAPSED, JSON.stringify([...ids].slice(-COLLAPSED_KEEP)));
+  } catch {
+    /* storage unavailable: the card opens again on the next render */
+  }
+}

@@ -580,14 +580,56 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   gap: 8px;
 }
 .log-card {
-  background: var(--surface);
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px;
+  touch-action: pan-y; /* sideways swipes open the tray (views/day.ts) */
 }
+.card-body {
+  position: relative;
+  z-index: 1;
+  padding: 12px;
+  background: var(--surface);
+  transition: transform 0.18s ease-out;
+}
+.log-card.swiping .card-body { transition: none; }
+.log-card.tray-open .card-body { transform: translateX(calc(-1 * var(--tray-w))); }
+/* Swipe tray: history, notes, AR, behind the card's right edge. */
+.log-card { --tray-w: 156px; }
+.card-tray { position: absolute; inset: 0 0 0 auto; width: var(--tray-w); display: flex; }
+.log-card:not(:has([data-ar])) { --tray-w: 104px; }
+.tray-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+.tray-btn.tray-history { color: var(--blue); }
+.tray-btn.tray-notes { color: var(--accent); }
+.tray-btn.tray-ar { color: var(--text); }
+.tray-btn:active { background: var(--border); }
+.tray-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Collapsed (tap the name; checking off the last set): the name, sets done and ×. */
+.log-name::before { content: "▾"; display: inline-block; width: 1em; color: var(--muted); }
+.log-card.is-collapsed .log-name::before { content: "▸"; }
+.log-progress { display: none; font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.log-card.is-collapsed .log-progress { display: inline; }
+.log-card.is-collapsed .log-head { margin: 0; align-items: center; }
+.log-card.is-collapsed .card-body > :not(.log-head),
+.log-card.is-collapsed .log-source { display: none; }
+@media (prefers-reduced-motion: reduce) { .card-body { transition: none; } }
 .log-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 8px; }
 .log-head h2 { margin: 0; font-size: 1.05rem; }
-/* The exercise name opens its history (and long-pressing it still lifts the card). */
+/* The exercise name collapses the card (and long-pressing it still lifts the card). */
 .log-name {
   padding: 0;
   border: 0;
@@ -841,7 +883,8 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 }
 .routine-item { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 /* While dragging, every card shrinks to its name. */
-.log-list.collapsed .log-card > :not(.log-head),
+.log-list.collapsed .card-body > :not(.log-head),
+.log-list.collapsed .card-tray,
 .log-list.collapsed .log-head-actions,
 .log-list.collapsed .log-source { display: none; }
 .log-list.collapsed .log-head { margin: 0; }
@@ -977,8 +1020,6 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   color: var(--muted);
 }
 .log-notes { margin: -2px 0 10px; }
-/* History and Notes stay together on the right; on a narrow card they wrap to a second line as a pair. */
-.log-actions-end { display: flex; gap: 8px; margin-left: auto; }
 .superset-btn { display: inline-flex; align-items: center; gap: 2px; padding: 0 10px; }
 .superset-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .history-day .note { margin: 2px 0 6px; }

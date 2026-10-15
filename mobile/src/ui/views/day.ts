@@ -1,7 +1,7 @@
 // The day view: logging sets, the "+ Add" sheet (routines / workouts / exercises), history
 // and notes sheets, long-press reordering, the calendar, swipe navigation and the rest
 // timer. Ported from templates/day.html, static/day.js and static/rest_timer.js.
-import { html, render } from "lit-html";
+import { html, render, svg } from "lit-html";
 import { isDeload, repRange, setDeload } from "../../logic/autoregulation";
 import * as day from "../../logic/day";
 import { type LogEntry, type LogSet } from "../../logic/day";
@@ -21,7 +21,7 @@ import { longPressReorder } from "../dragReorder";
 import { formatTime, parseTime } from "../time";
 import { historyList } from "./history";
 import { tapHaptic } from "../native";
-import { autoregulateOn, quickFillOn } from "../prefs";
+import { autoregulateOn, collapsedEntries, quickFillOn, setEntryCollapsed } from "../prefs";
 import { takeCreatedExercises } from "./exercises";
 import { mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
 
@@ -35,6 +35,16 @@ const FIELDS: Record<TrackingMode, { field: keyof LogSet; label: string; inputmo
 
 const linkIcon = html`<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
   stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg>`;
+// The swipe tray's icons: history, notes, autoregulate.
+const trayIcon = (paths: ReturnType<typeof svg>) => html`<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
+  fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+const bookIcon = trayIcon(svg`<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>`);
+const pencilIcon = trayIcon(svg`<path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/><path d="m15 5 4 4"/>`);
+const wrenchIcon = trayIcon(svg`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`);
+
+/** A card's sets checked off, e.g. "2/4 ✓", shown while it's collapsed. */
+const progressText = (done: number, total: number) => `${done}/${total} ✓`;
+const progress = (lx: LogEntry) => progressText(lx.sets.filter((s) => s.completed_at).length, lx.sets.length);
 
 route(/^\/day$/, (ctx) => dayView(ctx, ctx.today));
 route(/^\/day\/([^/]+)$/, (ctx) => dayView(ctx, ctx.params[0]));
@@ -132,18 +142,31 @@ async function dayView(ctx: Ctx, date: string) {
     return ranges.length ? html`<span class="range-note">${ranges.join(" · ")}</span>` : "";
   };
 
+  // Collapsing (user requirement, 2026-10-15): tapping the name toggles the card down to its
+  // name and sets done; checking off its last set collapses it. Remembered per device (ui/prefs.ts).
+  // History, notes and AR sit in a tray revealed by swiping the card left.
+  const collapsed = collapsedEntries();
   const card = (lx: LogEntry) => html`
-    <section class="log-card" id="lx-${lx.id}" data-lx=${lx.id}>
+    <section class="log-card${collapsed.has(lx.id) ? " is-collapsed" : ""}" id="lx-${lx.id}" data-lx=${lx.id}>
+      <div class="card-tray">
+        <button type="button" class="tray-btn tray-history" data-history=${lx.exercise.id} data-name=${lx.exercise.name}
+                aria-haspopup="dialog" aria-label="History of ${lx.exercise.name}" title="History">${bookIcon}</button>
+        <button type="button" class="tray-btn tray-notes" data-notes=${lx.id} data-name=${lx.exercise.name}
+                data-exercise-note=${lx.exercise.note ?? ""} data-session-note=${lx.note ?? ""}
+                aria-haspopup="dialog" aria-label="Notes for ${lx.exercise.name}" title="Notes">${pencilIcon}</button>
+        ${lx.exercise.tracks.reps ? html`
+          <button type="button" class="tray-btn tray-ar" data-ar=${lx.id}
+                  aria-label="Autoregulate ${lx.exercise.name} from its last session" title="Autoregulate">${wrenchIcon}</button>` : ""}
+      </div>
+      <div class="card-body" id="lx-body-${lx.id}">
       <div class="log-head">
         <div>
-          <h2><button type="button" class="log-name" data-history=${lx.exercise.id} data-name=${lx.exercise.name} data-drag-ok
-                      aria-haspopup="dialog" title="Show history">${lx.exercise.name}</button></h2>
+          <h2><button type="button" class="log-name" data-toggle=${lx.id} data-drag-ok
+                      aria-expanded=${collapsed.has(lx.id) ? "false" : "true"} aria-controls="lx-body-${lx.id}">${lx.exercise.name}</button></h2>
           ${lx.workout_name && lx.log_workout_id === null ? html`<span class="log-source">${lx.workout_name}</span>` : ""}
         </div>
         <div class="log-head-actions">
-          ${lx.exercise.tracks.reps ? html`
-            <button type="button" class="button subtle small" data-ar=${lx.id}
-                    aria-label="Autoregulate ${lx.exercise.name} from its last session">AR</button>` : ""}
+          <span class="log-progress" data-progress>${progress(lx)}</span>
           <button type="button" class="icon-btn danger" aria-label="Remove ${lx.exercise.name}"
                   data-confirm-delete="entry:${lx.id}" data-name=${lx.exercise.name}
                   data-detail="Removes it and its sets from this day.">&times;</button>
@@ -164,10 +187,7 @@ async function dayView(ctx: Ctx, date: string) {
         <button type="button" class="button subtle small" data-act="add-set" data-lx=${lx.id}>+ Set</button>
         <button type="button" class="button subtle small" data-act="remove-set" data-lx=${lx.id} ?disabled=${lx.sets.length === 1}>&minus; Set</button>
         ${supersetButton(lx)}
-        <div class="log-actions-end">
-          <button type="button" class="button subtle small" data-notes=${lx.id} data-name=${lx.exercise.name}
-                data-exercise-note=${lx.exercise.note ?? ""} data-session-note=${lx.note ?? ""}>Notes</button>
-        </div>
+      </div>
       </div>
     </section>`;
 
@@ -230,7 +250,8 @@ async function dayView(ctx: Ctx, date: string) {
           ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
         </div>
         ${blocks.length ? html`
-          ${blocks.length > 1 ? html`<p class="hint reorder-hint">Long-press an exercise, or a workout’s name, to drag it.</p>` : ""}
+          <p class="hint reorder-hint">Swipe an exercise left for history, notes and autoregulation.${blocks.length > 1
+            ? html`<br>Long-press an exercise, or a workout’s name, to drag it.` : ""}</p>
           <div class="log-list" id="log-list">
             ${segments.map((seg) => (seg.w ? workoutBlock(seg.w, seg.blocks) : seg.blocks.map(blockHtml)))}
           </div>` : html`
@@ -521,7 +542,21 @@ function mountDay(
     }
     row.classList.toggle("done", data.completed);
     row.querySelector(".check")!.setAttribute("aria-pressed", String(data.completed));
+    const card = row.closest<HTMLElement>(".log-card")!;
+    const rows = card.querySelectorAll("[data-set]");
+    card.querySelector("[data-progress]")!.textContent = progressText(card.querySelectorAll("[data-set].done").length, rows.length);
   }
+
+  // ---------- collapsing cards ----------
+  function setCollapsed(card: HTMLElement, collapse: boolean) {
+    card.classList.toggle("is-collapsed", collapse);
+    card.querySelector(".log-name")!.setAttribute("aria-expanded", String(!collapse));
+    setEntryCollapsed(Number(card.dataset.lx), collapse);
+  }
+  on(dayEl, "click", (e: Event) => {
+    const btn = (e.target as Element).closest<HTMLElement>("[data-toggle]");
+    if (btn) setCollapsed(btn.closest<HTMLElement>(".log-card")!, !btn.closest(".is-collapsed"));
+  });
 
   on(dayEl, "change", async (e: Event) => {
     const input = (e.target as Element).closest<HTMLInputElement>("input[data-field]");
@@ -621,6 +656,14 @@ function mountDay(
       const data = await day.updateSet(db, Number(row.dataset.set), body);
       applySet(row, data);
       if (data.completed) tapHaptic();
+      // Its last set checked off: the card folds away after a beat, so the ✓ is seen first.
+      const card = row.closest<HTMLElement>(".log-card")!;
+      if (data.completed && !card.querySelector("[data-set]:not(.done)")) {
+        setEntryCollapsed(Number(card.dataset.lx), true);
+        setTimeout(() => card.isConnected && !card.querySelector("[data-set]:not(.done)") && setCollapsed(card, true), 350);
+      } else if (!data.completed && !card.classList.contains("is-collapsed")) {
+        setEntryCollapsed(Number(card.dataset.lx), false); // unchecked before it folded
+      }
       if (data.completed && !dayEl.querySelector("[data-set]:not(.done)")) o.onDayFinished();
       else if (data.completed && row.dataset.rest === "1") o.onSetCompleted();
       // The first ✓ of a workout today starts it (and finishes the one in progress).
@@ -951,6 +994,12 @@ function mountDay(
   const lift = () => {
     touch = null; // cancel any day swipe in progress
     dayEl.style.transform = "";
+    if (cardSwipe) {
+      cardSwipe.card.classList.remove("swiping");
+      cardSwipe.body.style.transform = "";
+      cardSwipe = null;
+    }
+    setTray(null);
     logList!.classList.add("collapsed");
   };
   const settle = () => logList!.classList.remove("collapsed");
@@ -1062,8 +1111,10 @@ function mountDay(
   if (enterFrom) dayEl.classList.add(enterFrom === "next" ? "enter-from-right" : "enter-from-left");
   enterFrom = null;
 
+  // Swiping an exercise card opens its tray instead (see below), so days change by swiping
+  // anywhere else: the header, the gaps, workout headers, an empty day.
   on(dayEl, "touchstart", (e: TouchEvent) => {
-    if (e.touches.length !== 1 || (e.target as Element).closest("input")) return (touch = null);
+    if (e.touches.length !== 1 || (e.target as Element).closest("input, .log-card")) return (touch = null);
     touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() };
   }, { passive: true });
   on(dayEl, "touchmove", (e: TouchEvent) => {
@@ -1084,6 +1135,65 @@ function mountDay(
   on(dayEl, "touchcancel", () => {
     dayEl.style.transform = "";
     touch = null;
+  });
+
+  // ---------- card tray: swipe an exercise left for history, notes and AR ----------
+  // One tray open at a time. Any tap outside it closes it (and does nothing else); a tray button
+  // does its job and closes it. Keyboard focus on a tray button opens it too.
+  let openCard: HTMLElement | null = null;
+  let cardSwipe: { card: HTMLElement; body: HTMLElement; x: number; y: number; base: number; width: number; axis: "x" | "y" | null } | null = null;
+  const trayWidth = (card: HTMLElement) => card.querySelector<HTMLElement>(".card-tray")!.offsetWidth;
+  function setTray(card: HTMLElement | null) {
+    if (openCard && openCard !== card) openCard.classList.remove("tray-open");
+    openCard = card;
+    card?.classList.add("tray-open");
+  }
+  on(dayEl, "touchstart", (e: TouchEvent) => {
+    const card = (e.target as Element).closest<HTMLElement>(".log-card");
+    if (e.touches.length !== 1 || !card || (e.target as Element).closest(".card-tray")) return (cardSwipe = null);
+    const width = trayWidth(card);
+    cardSwipe = {
+      card, body: card.querySelector<HTMLElement>(".card-body")!, width, axis: null,
+      x: e.touches[0].clientX, y: e.touches[0].clientY, base: card === openCard ? -width : 0,
+    };
+  }, { passive: true });
+  on(dayEl, "touchmove", (e: TouchEvent) => {
+    if (!cardSwipe || reorder.isDragging()) return;
+    const dx = e.touches[0].clientX - cardSwipe.x;
+    const dy = e.touches[0].clientY - cardSwipe.y;
+    if (!cardSwipe.axis) {
+      if (Math.hypot(dx, dy) < 10) return;
+      cardSwipe.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      if (cardSwipe.axis === "x") cardSwipe.card.classList.add("swiping");
+    }
+    if (cardSwipe.axis !== "x") return;
+    const offset = Math.min(0, Math.max(-cardSwipe.width, cardSwipe.base + dx));
+    cardSwipe.body.style.transform = `translateX(${offset}px)`;
+  }, { passive: true });
+  const endCardSwipe = (e?: TouchEvent) => {
+    const s = cardSwipe;
+    cardSwipe = null;
+    if (!s || s.axis !== "x") return;
+    s.card.classList.remove("swiping");
+    s.body.style.transform = "";
+    const dx = e ? e.changedTouches[0].clientX - s.x : 0;
+    const open = s.base + dx < -s.width * 0.4;
+    setTray(open ? s.card : s.card === openCard ? null : openCard);
+  };
+  on(dayEl, "touchend", endCardSwipe);
+  on(dayEl, "touchcancel", () => endCardSwipe());
+  on(document, "click", (e: Event) => {
+    if (!openCard) return;
+    const t = e.target as Element;
+    if (t.closest(".card-tray") && openCard.contains(t)) return setTray(null); // the button's own handler runs
+    e.preventDefault();
+    e.stopPropagation();
+    setTray(null);
+  }, { capture: true });
+  on(dayEl, "focusin", (e: FocusEvent) => {
+    const tray = (e.target as Element).closest(".card-tray");
+    if (tray) setTray(tray.closest<HTMLElement>(".log-card"));
+    else if (openCard && !openCard.contains(e.target as Node)) setTray(null);
   });
   on(document, "keydown", (e: KeyboardEvent) => {
     if ((e.target as Element).closest("input, textarea") || document.querySelector("dialog[open]")) return;

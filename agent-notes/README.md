@@ -21,7 +21,7 @@ Anything here is committed to git so future sessions can build on it.
 - Add every note to the index below with a one-line description.
 
 ## Index
-- [stack-decisions.md](stack-decisions.md) — why Flask, mobile-first layout rules, bottom bar, localhost-only constraint
+- [stack-decisions.md](stack-decisions.md) — why Flask, mobile-first layout rules, bottom bar, localhost-only constraint, day-view card collapse and swipe tray
 - [data-model.md](data-model.md) — migrations workflow, exercises, workouts (set targets), routines, day log, notes, exercise history, progress page (target snapshots), superset/AMRAP/rest-timer rules, delete rules, demo data
 - [mobile-app-plan.md](mobile-app-plan.md) — decision: offline on-device Capacitor app (Android APK + iPhone PWA), no servers/data/stores, no Mac; default presets/exercises seeded on fresh install; iPhone PWA (service worker, manifest, hosting)
 - [day-workouts.md](day-workouts.md) — each loaded workout on a day is a `log_workout` with its own times (schema v4, mobile only): agreed rules, build steps and status, grouping of old history
