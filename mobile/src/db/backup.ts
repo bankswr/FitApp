@@ -44,6 +44,7 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
   // (progress_target, deload_day) and columns with defaults (routine.autoregulate,
   // log_set.target_reps), so an older backup (e.g. from Flask) simply has none of them. Schema 4
   // added log_workout: an older backup's history is grouped into workouts after it's loaded.
+  // Schema 5 added exercise.weight_step (nullable), so older backups need nothing.
   const tables = backup.tables;
   if (!tables || typeof tables !== "object") throw new BackupError("The backup has no data.");
   const unknown = Object.keys(tables).filter((t) => !(TABLES as readonly string[]).includes(t));

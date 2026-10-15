@@ -21,7 +21,7 @@ import { longPressReorder } from "../dragReorder";
 import { formatTime, parseTime } from "../time";
 import { historyList } from "./history";
 import { tapHaptic } from "../native";
-import { autoregulateOn, collapsedEntries, quickFillOn, setEntryCollapsed } from "../prefs";
+import { autoregulation, collapsedEntries, quickFillOn, setEntryCollapsed, weightStepDefault } from "../prefs";
 import { takeCreatedExercises } from "./exercises";
 import { mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
 
@@ -842,8 +842,8 @@ function mountDay(
     const id = Number(item.dataset.id);
     btn.disabled = true;
     try {
-      if (item.dataset.kind === "routines") await day.loadRoutine(db, o.date, id, Number(item.dataset.index), autoregulateOn());
-      else await day.loadWorkout(db, o.date, id, autoregulateOn());
+      if (item.dataset.kind === "routines") await day.loadRoutine(db, o.date, id, Number(item.dataset.index), autoregulation());
+      else await day.loadWorkout(db, o.date, id, autoregulation());
       addSheet.close();
       await refresh();
     } catch (err) {
@@ -881,7 +881,7 @@ function mountDay(
     on(exAdd, "click", async () => {
       exAdd.disabled = true;
       try {
-        await day.addExercises(db, o.date, [...selected], autoregulateOn(), true); // join the workout in progress
+        await day.addExercises(db, o.date, [...selected], autoregulation(), true); // join the workout in progress
         addSheet.close();
         await refresh();
       } catch (err) {
@@ -909,7 +909,7 @@ function mountDay(
     if (!btn) return;
     btn.disabled = true;
     try {
-      const from = await day.autoregulateEntry(db, Number(btn.dataset.ar));
+      const from = await day.autoregulateEntry(db, Number(btn.dataset.ar), weightStepDefault());
       if (!from) {
         btn.disabled = false;
         return toast("No earlier session of this exercise to go by (deload days don’t count).");

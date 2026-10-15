@@ -1,3 +1,5 @@
+import { type Autoregulate, WEIGHT_STEP, WEIGHT_STEP_MAX } from "../logic/autoregulation";
+
 // Per-device preferences kept in localStorage (like the rest timer's). Reads fall back to the
 // default when storage is unavailable.
 const QUICK_FILL = "fitapp.quickFill";
@@ -61,4 +63,28 @@ export function setEntryCollapsed(id: number, collapsed: boolean) {
   } catch {
     /* storage unavailable: the card opens again on the next render */
   }
+}
+
+const WEIGHT_STEP_KEY = "fitapp.weightStep";
+
+/** Autoregulation's default weight step in lb (user requirement, 2026-10-15); exercises can override it. */
+export function weightStepDefault(): number {
+  try {
+    const n = Number(localStorage.getItem(WEIGHT_STEP_KEY));
+    return Number.isFinite(n) && n > 0 && n <= WEIGHT_STEP_MAX ? n : WEIGHT_STEP;
+  } catch {
+    return WEIGHT_STEP;
+  }
+}
+export function setWeightStepDefault(step: number) {
+  try {
+    localStorage.setItem(WEIGHT_STEP_KEY, String(step));
+  } catch {
+    /* storage unavailable: the setting lasts until the app reloads */
+  }
+}
+
+/** What the day view passes to its loaders: off, or on with this device's default weight step. */
+export function autoregulation(): Autoregulate {
+  return autoregulateOn() && { weightStep: weightStepDefault() };
 }

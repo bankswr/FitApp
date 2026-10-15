@@ -1,12 +1,39 @@
 // Autoregulation (user requirement, 2026-10-04; not in Flask). A routine with autoregulate on
 // adjusts each loaded set's rep and weight targets from the last time the workout was done:
-// beat the rep target -> reps + 1; fell short -> what was reached; past the range -> +5 lb at the
-// range minimum; under the minimum -> -5 lb at the minimum. Deload days are never the reference.
+// beat the rep target -> reps + 1; fell short -> what was reached; past the range -> + one weight
+// step at the range minimum; under the minimum -> - one step at the minimum. The step is the
+// exercise's own, else the Settings default (5 lb unless changed). Deload days are never the reference.
 import { type Db, get } from "../db/types";
+import { ValidationError } from "./text";
 import type { WorkoutSet, WorkoutSlot } from "./workouts";
 
 export const DEFAULT_REP_RANGE = { min: 8, max: 15 };
-export const WEIGHT_STEP = 5; // lb
+export const WEIGHT_STEP = 5; // lb, the default until Settings changes it
+
+/** The weight-step ladder the +/− buttons move along (user requirement, 2026-10-15). Any positive value can be typed. */
+export const WEIGHT_STEPS = [1.25, 2.5, 5, 10, 25, 45];
+/** The next ladder value above / below `value` (null when there's none). */
+export const stepUp = (value: number) => WEIGHT_STEPS.find((s) => s > value) ?? null;
+export const stepDown = (value: number) => [...WEIGHT_STEPS].reverse().find((s) => s < value) ?? null;
+export const WEIGHT_STEP_MAX = 1000;
+
+/** A typed weight step: blank → null (use the default); otherwise a positive number up to 1000, 2 decimals. */
+export function parseWeightStep(raw: string): number | null {
+  const text = raw.trim();
+  if (!text) return null;
+  const n = Number(text);
+  if (!Number.isFinite(n) || n <= 0 || n > WEIGHT_STEP_MAX) {
+    throw new ValidationError(`The weight step should be a number above 0 and up to ${WEIGHT_STEP_MAX}.`);
+  }
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * How the day's loaders autoregulate: false (off, Flask parity), true (on with the 5 lb default),
+ * or on with Settings' default step. An exercise's own step always wins over the default.
+ */
+export type Autoregulate = boolean | { weightStep: number };
+export const defaultStepOf = (a: Autoregulate) => (typeof a === "object" ? a.weightStep : WEIGHT_STEP);
 
 /** The rep range autoregulation works within: the plan's, with a blank end defaulting to 8–15. */
 export function repRange(set: Pick<WorkoutSet, "reps_min" | "reps_max">): { min: number; max: number } {
@@ -32,7 +59,9 @@ export interface PreviousSet {
  * The next targets for one set, from the same set last time. `plan` gives the rep range and the
  * fallback weight; `tracksWeight` is false for exercises that only track reps.
  */
-export function nextTargets(prev: PreviousSet, plan: Pick<WorkoutSet, "reps_min" | "reps_max" | "is_amrap" | "weight">, tracksWeight: boolean): SetTargets {
+export function nextTargets(
+  prev: PreviousSet, plan: Pick<WorkoutSet, "reps_min" | "reps_max" | "is_amrap" | "weight">, tracksWeight: boolean, step = WEIGHT_STEP,
+): SetTargets {
   const { min, max } = repRange(plan);
   // Not checked off (or no reps typed): carry the previous targets forward unchanged.
   if (prev.completed_at === null || prev.reps === null) {
@@ -44,11 +73,11 @@ export function nextTargets(prev: PreviousSet, plan: Pick<WorkoutSet, "reps_min"
   // is carried over unchanged. Changing it is left to the user.
   if (plan.is_amrap) return { reps: reps >= (prev.target_reps ?? reps) ? reps + 1 : reps, weight };
   const target: number = prev.target_reps ?? min; // the first autoregulated session compares with the minimum
-  if (reps < min) return { reps: min, weight: weight === null ? null : Math.max(0, weight - WEIGHT_STEP) };
+  if (reps < min) return { reps: min, weight: weight === null ? null : Math.max(0, weight - step) };
   const next = reps >= target ? reps + 1 : reps;
   if (next > max) {
     // No weight to raise (bodyweight): hold at the top of the range instead.
-    return weight === null ? { reps: max, weight: null } : { reps: min, weight: weight + WEIGHT_STEP };
+    return weight === null ? { reps: max, weight: null } : { reps: min, weight: weight + step };
   }
   return { reps: next, weight: tracksWeight ? weight : plan.weight };
 }
@@ -71,7 +100,9 @@ export const NOT_DELOAD = "date NOT IN (SELECT date FROM deload_day)";
  * rearranged workout still lines up. A slot whose exercise wasn't in that session (replaced) uses
  * the exercise's own latest earlier non-deload entry. Never done before: the plan, unchanged.
  */
-export async function autoregulatedTargets(db: Db, date: string, workoutId: number, slots: WorkoutSlot[]): Promise<(SetTargets | null)[][]> {
+export async function autoregulatedTargets(
+  db: Db, date: string, workoutId: number, slots: WorkoutSlot[], defaultStep = WEIGHT_STEP,
+): Promise<(SetTargets | null)[][]> {
   const planOnly = slots.map((wx) => wx.sets.map(() => null));
   const last = await get(db,
     `SELECT lw.id FROM log_workout lw JOIN log_exercise lx ON lx.log_workout_id = lw.id
@@ -94,7 +125,7 @@ export async function autoregulatedTargets(db: Db, date: string, workoutId: numb
     result.push(wx.sets.map((ws, n) => {
       const prev = prevSets[n];
       if (!prev || !wx.exercise.tracks.reps) return null;
-      return nextTargets(prev as PreviousSet, ws, wx.exercise.tracks.weight);
+      return nextTargets(prev as PreviousSet, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep);
     }));
   }
   return result;

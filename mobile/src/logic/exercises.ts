@@ -1,5 +1,6 @@
 // Exercises: listing, the add/edit form, delete rules, and picker data. Ported from app.py.
 import { type Db, get, utcNow } from "../db/types";
+import { parseWeightStep } from "./autoregulation";
 import { NotFoundError } from "./errors";
 import { compareMuscles, getOrCreateMuscle, orderedMuscleGroups } from "./muscles";
 import {
@@ -14,6 +15,8 @@ export interface Exercise {
   primary: string[];
   ancillary: string[];
   tracks: Record<TrackingMode, boolean>;
+  /** Autoregulation's weight step for this exercise (lb); null uses the Settings default. Mobile only (schema 5). */
+  weight_step: number | null;
 }
 
 /** Every exercise (by name), with tracking modes and muscle names in canonical order. */
@@ -31,7 +34,7 @@ export async function listExercises(db: Db, ids?: number[]): Promise<Exercise[]>
         .sort(compareMuscles)
         .map((m) => m.name);
     return {
-      id: r.id, name: r.name, note: r.note, tracks,
+      id: r.id, name: r.name, note: r.note, tracks, weight_step: r.weight_step ?? null,
       modes: TRACKING_MODES.filter((m) => tracks[m]),
       primary: muscles("primary"), ancillary: muscles("ancillary"),
     };
@@ -67,6 +70,8 @@ export interface ExerciseForm {
   primary: string[];
   ancillary: string[];
   note: string;
+  /** Typed weight step; blank or missing → null (the default). Optional so Flask-parity forms still fit. */
+  weight_step?: string;
 }
 
 export type SaveResult = { ok: true; id: number; name: string } | { ok: false; errors: string[]; form: ExerciseForm };
@@ -81,6 +86,7 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     primary: cleanMuscles(input.primary ?? []),
     ancillary: [],
     note: input.note ?? "",
+    weight_step: input.weight_step ?? "",
   };
   const primaryLower = new Set(form.primary.map((m) => m.toLowerCase()));
   form.ancillary = cleanMuscles(input.ancillary ?? []).filter((m) => !primaryLower.has(m.toLowerCase()));
@@ -98,6 +104,16 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     if (!(e instanceof ValidationError)) throw e;
     errors.push(e.message);
   }
+  // Only weighted exercises have a step; it's dropped (back to the default) when weight isn't tracked.
+  let weightStep: number | null = null;
+  if (form.tracking.includes("weight")) {
+    try {
+      weightStep = parseWeightStep(form.weight_step!);
+    } catch (e) {
+      if (!(e instanceof ValidationError)) throw e;
+      errors.push(e.message);
+    }
+  }
   if (errors.length) return { ok: false, errors, form };
 
   const tracks = Object.fromEntries(TRACKING_MODES.map((m) => [m, form.tracking.includes(m) ? 1 : 0]));
@@ -105,16 +121,16 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     let exerciseId = id;
     if (exerciseId === null) {
       exerciseId = (await db.run(
-        `INSERT INTO exercise (name, note, tracks_weight, tracks_reps, tracks_time, tracks_distance, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, utcNow()],
+        `INSERT INTO exercise (name, note, tracks_weight, tracks_reps, tracks_time, tracks_distance, weight_step, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, utcNow()],
       )).lastId;
     } else {
       await db.run("DELETE FROM exercise_muscle WHERE exercise_id = ?", [exerciseId]);
       await db.run(
-        `UPDATE exercise SET name = ?, note = ?, tracks_weight = ?, tracks_reps = ?, tracks_time = ?, tracks_distance = ?
-         WHERE id = ?`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, exerciseId],
+        `UPDATE exercise SET name = ?, note = ?, tracks_weight = ?, tracks_reps = ?, tracks_time = ?, tracks_distance = ?,
+           weight_step = ? WHERE id = ?`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, exerciseId],
       );
       // Targets for a mode the exercise no longer tracks are meaningless; clear them from workouts.
       const stale: string[] = [];

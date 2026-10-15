@@ -1,7 +1,9 @@
 // The day log: exercises and sets on a calendar day, loading workouts/routines, set
 // autosave, notes, reordering, and calendar counts. Ported from app.py.
 import { type Db, get, type Row, utcNow } from "../db/types";
-import { autoregulatedTargets, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets } from "./autoregulation";
+import {
+  type Autoregulate, autoregulatedTargets, defaultStepOf, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
+} from "./autoregulation";
 import { joinDayWorkout, pruneLogWorkouts, workoutForNewExercises } from "./dayWorkouts";
 import { ConflictError, NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
@@ -181,18 +183,18 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
 }
 
 // `autoregulate` is the Settings switch (user requirement, 2026-10-10; per device, so the UI
-// passes it in). Off: plan targets as saved, like Flask.
+// passes it in, with Settings' default weight step). Off: plan targets as saved, like Flask.
 
 /** Loads a workout. Autoregulated from that workout's latest earlier non-deload session, from any source. */
-export async function loadWorkout(db: Db, date: string, workoutId: number, autoregulate = false): Promise<void> {
+export async function loadWorkout(db: Db, date: string, workoutId: number, autoregulate: Autoregulate = false): Promise<void> {
   checkDate(date);
   const workout = await getWorkout(db, workoutId);
-  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots) : undefined;
+  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots, defaultStepOf(autoregulate)) : undefined;
   await addWorkoutToDay(db, date, workout, adjusted);
 }
 
 /** Loads the routine's workout at `index` (default: the next one in its rotation). Returns the workout name. */
-export async function loadRoutine(db: Db, date: string, routineId: number, index?: number, autoregulate = false): Promise<string> {
+export async function loadRoutine(db: Db, date: string, routineId: number, index?: number, autoregulate: Autoregulate = false): Promise<string> {
   checkDate(date);
   const routine = await getRoutine(db, routineId);
   if (!routine.workout_ids.length) throw new ConflictError("That routine has no workouts.");
@@ -201,7 +203,7 @@ export async function loadRoutine(db: Db, date: string, routineId: number, index
     throw new ConflictError("That routine changed. Reload and try again.");
   }
   const workout = await getWorkout(db, routine.workout_ids[i]);
-  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots) : undefined;
+  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots, defaultStepOf(autoregulate)) : undefined;
   await addWorkoutToDay(db, date, workout, adjusted);
   return workout.name;
 }
@@ -212,7 +214,7 @@ export async function loadRoutine(db: Db, date: string, routineId: number, index
  * `joinWorkout` (the day screen passes true; off keeps Flask parity): they join the workout in
  * progress, else the latest unfinished one, else stay outside any (agent-notes/day-workouts.md).
  */
-export async function addExercises(db: Db, date: string, ids: unknown, autoregulate = false, joinWorkout = false): Promise<void> {
+export async function addExercises(db: Db, date: string, ids: unknown, autoregulate: Autoregulate = false, joinWorkout = false): Promise<void> {
   checkDate(date);
   if (!Array.isArray(ids) || !ids.length || ids.some((i) => typeof i !== "number" || !Number.isInteger(i))) {
     throw new ValidationError("Pick at least one exercise.");
@@ -229,7 +231,7 @@ export async function addExercises(db: Db, date: string, ids: unknown, autoregul
       added.push(entryId);
       const count = byId.get(exerciseId)!.tracks.reps ? 3 : 1;
       for (let n = 1; n <= count; n++) await db.run("INSERT INTO log_set (log_exercise_id, position) VALUES (?, ?)", [entryId, n]);
-      if (autoregulate && byId.get(exerciseId)!.tracks.reps) await targetsFromLastSession(db, entryId);
+      if (autoregulate && byId.get(exerciseId)!.tracks.reps) await targetsFromLastSession(db, entryId, defaultStepOf(autoregulate));
     }
     const target = joinWorkout ? await workoutForNewExercises(db, date) : null;
     if (target !== null) await joinDayWorkout(db, date, target, added);
@@ -347,11 +349,11 @@ export async function updateSet(db: Db, setId: number, data: Record<string, unkn
  * field already has a value (user requirement); logged values are never touched.
  * Returns the reference date, or null when there's no earlier entry to go by.
  */
-export async function autoregulateEntry(db: Db, entryId: number): Promise<string | null> {
-  return db.transaction(() => targetsFromLastSession(db, entryId));
+export async function autoregulateEntry(db: Db, entryId: number, defaultStep = WEIGHT_STEP): Promise<string | null> {
+  return db.transaction(() => targetsFromLastSession(db, entryId, defaultStep));
 }
 
-async function targetsFromLastSession(db: Db, entryId: number): Promise<string | null> {
+async function targetsFromLastSession(db: Db, entryId: number, defaultStep: number): Promise<string | null> {
   const entry = await getEntry(db, entryId);
   if (!entry.exercise.tracks.reps) throw new ValidationError("Autoregulation needs an exercise that tracks reps.");
   const ref = await get(
@@ -364,7 +366,7 @@ async function targetsFromLastSession(db: Db, entryId: number): Promise<string |
     if (!prevSets[n]) break;
     if (s.completed_at !== null) continue;
     const plan = { reps_min: s.target_reps_min, reps_max: s.target_reps_max, is_amrap: s.target_amrap, weight: s.target_weight };
-    const t = nextTargets(prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight);
+    const t = nextTargets(prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight, entry.exercise.weight_step ?? defaultStep);
     const updates: [string, number | null][] = [];
     if (s.reps === null) updates.push(["target_reps", t.reps]);
     if (s.weight === null) updates.push(["target_weight", t.weight]);

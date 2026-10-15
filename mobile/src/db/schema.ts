@@ -150,6 +150,11 @@ export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
     `);
     await groupLogWorkouts(db);
   },
+  // 5: per-exercise autoregulation weight step (user, 2026-10-15; agent-notes/autoregulation.md).
+  // Not in Flask. NULL uses the Settings default.
+  `
+  ALTER TABLE exercise ADD COLUMN weight_step FLOAT CHECK (weight_step IS NULL OR weight_step > 0);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

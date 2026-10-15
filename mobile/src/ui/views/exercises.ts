@@ -7,9 +7,11 @@ import {
   muscleChoices, saveExercise,
 } from "../../logic/exercises";
 import { exerciseHistory } from "../../logic/history";
-import { MUSCLE_ROLES, NOTE_MAX_LENGTH, TRACKING_MODES } from "../../logic/text";
+import { formatNumber, MUSCLE_ROLES, NOTE_MAX_LENGTH, TRACKING_MODES } from "../../logic/text";
 import { type Ctx, currentPath, flash, navigate, refresh, returnTo, route, stash, takeStash } from "../app";
 import { exerciseFilter, filterControls, type FilterState } from "../exerciseFilter";
+import { weightStepDefault } from "../prefs";
+import { mountWeightStep, weightStepField } from "../weightStep";
 import { historyList } from "./history";
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -128,8 +130,11 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
   const next = !exercise && nextParam?.startsWith("#/") ? nextParam : null;
   const stashed = takeStash<FormStash>();
   const form: ExerciseForm = stashed?.form ?? (exercise
-    ? { name: exercise.name, tracking: exercise.modes, primary: exercise.primary, ancillary: exercise.ancillary, note: exercise.note ?? "" }
-    : { name: "", tracking: [], primary: [], ancillary: [], note: "" });
+    ? {
+      name: exercise.name, tracking: exercise.modes, primary: exercise.primary, ancillary: exercise.ancillary,
+      note: exercise.note ?? "", weight_step: formatNumber(exercise.weight_step),
+    }
+    : { name: "", tracking: [], primary: [], ancillary: [], note: "", weight_step: "" });
   const errors = stashed?.errors ?? [];
   const muscles = await muscleChoices(ctx.db, [...form.primary, ...form.ancillary]);
   const selected = Object.fromEntries(MUSCLE_ROLES.map((r) => [r, new Set(form[r].map((m) => m.toLowerCase()))]));
@@ -180,6 +185,13 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
               </label>`)}
           </div>
         </fieldset>
+        <div class="field" id="weight-step-field" ?hidden=${!form.tracking.includes("weight")}>
+          <label for="weight_step">Autoregulation weight step</label>
+          <p class="hint">How much autoregulation moves this exercise's weight. Leave blank to use the Settings
+            default (${formatNumber(weightStepDefault())}&nbsp;lb).</p>
+          ${weightStepField({ id: "weight_step", name: "weight_step", value: form.weight_step ?? "",
+            placeholder: formatNumber(weightStepDefault()), label: "Weight step" })}
+        </div>
         ${muscleField("primary", "Primary muscle groups", "The main muscles this exercise targets.")}
         ${muscleField("ancillary", "Ancillary muscle groups", "Supporting muscles (optional).")}
         <div class="field">
@@ -193,6 +205,11 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
       ${exercise ? deleteButton(exercise, blocked, true) : ""}`,
     mount(root: HTMLElement, signal: AbortSignal) {
       mountMuscleChips(root, signal);
+      // The weight step only applies to exercises that track weight.
+      const stepField = root.querySelector<HTMLElement>("#weight-step-field")!;
+      mountWeightStep(stepField.querySelector("[data-weight-step]")!, signal);
+      const weightBox = root.querySelector<HTMLInputElement>('input[name="tracking"][value="weight"]')!;
+      weightBox.addEventListener("change", () => (stepField.hidden = !weightBox.checked), { signal });
       if (focusNameOnMount) root.querySelector<HTMLInputElement>("#name")!.focus();
       focusNameOnMount = false;
       const formEl = root.querySelector<HTMLFormElement>("#exercise-form")!;
@@ -205,6 +222,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
           primary: data.getAll("primary").map(String),
           ancillary: data.getAll("ancillary").map(String),
           note: String(data.get("note") ?? ""),
+          weight_step: String(data.get("weight_step") ?? ""),
         };
         const result = await saveExercise(ctx.db, exercise?.id ?? null, input);
         if (result.ok) {

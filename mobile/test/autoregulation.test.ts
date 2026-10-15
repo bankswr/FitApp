@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { migrate } from "../src/db/schema";
-import { isDeload, nextTargets, type PreviousSet, repRange, setDeload } from "../src/logic/autoregulation";
+import {
+  isDeload, nextTargets, parseWeightStep, type PreviousSet, repRange, setDeload, stepDown, stepUp,
+} from "../src/logic/autoregulation";
 import { addExercises, addLogSet, autoregulateEntry, clearDay, dayEntries, loadRoutine, loadWorkout, updateSet } from "../src/logic/day";
-import { saveExercise } from "../src/logic/exercises";
+import { getExercise, saveExercise } from "../src/logic/exercises";
 import { syncMuscleGroups } from "../src/logic/muscles";
 import { getRoutine, saveRoutine } from "../src/logic/routines";
 import { saveWorkout, type WorkoutSet } from "../src/logic/workouts";
@@ -257,5 +259,49 @@ describe("AR button (one exercise on a day)", () => {
     if (!plank.ok) throw new Error(plank.errors.join());
     await addExercises(c.db, "2026-10-03", [plank.id]);
     await expect(autoregulateEntry(c.db, await entryId(c, "2026-10-03", plank.id))).rejects.toThrow("tracks reps");
+  });
+});
+
+describe("weight step (user requirement, 2026-10-15)", () => {
+  it("moves by the given step instead of 5 lb", () => {
+    expect(nextTargets(done(12, 135, 12), plan(8, 12), true, 2.5)).toEqual({ reps: 8, weight: 137.5 });
+    expect(nextTargets(done(7, 135, 10), plan(8, 12), true, 10)).toEqual({ reps: 8, weight: 125 });
+    expect(nextTargets(done(3, 20, 8), plan(8, 12), true, 45)).toEqual({ reps: 8, weight: 0 }); // never below 0
+  });
+
+  it("steps along the ladder from any value, and parses typed values", () => {
+    expect([stepUp(5), stepDown(5), stepUp(7), stepDown(7), stepUp(45), stepDown(1.25), stepDown(1)])
+      .toEqual([10, 2.5, 10, 5, null, null, null]);
+    expect([parseWeightStep(""), parseWeightStep(" 2.5 "), parseWeightStep("1.234")]).toEqual([null, 2.5, 1.23]);
+    for (const bad of ["0", "-5", "abc", "1001"]) expect(() => parseWeightStep(bad), bad).toThrow("weight step");
+  });
+
+  it("saves per exercise, only for exercises that track weight", async () => {
+    const c = await setup();
+    const form = { name: "Curl", tracking: ["weight", "reps"], primary: ["Biceps"], ancillary: [], note: "", weight_step: "2.5" };
+    const r = await saveExercise(c.db, null, form);
+    if (!r.ok) throw new Error(r.errors.join());
+    expect((await getExercise(c.db, r.id)).weight_step).toBe(2.5);
+    const bad = await saveExercise(c.db, r.id, { ...form, weight_step: "0" });
+    expect(bad.ok ? [] : bad.errors).toEqual(["The weight step should be a number above 0 and up to 1000."]);
+    expect((await saveExercise(c.db, r.id, { ...form, tracking: ["reps"] })).ok).toBe(true);
+    expect((await getExercise(c.db, r.id)).weight_step).toBeNull();
+  });
+
+  it("uses the exercise's own step, else the default the day passes in", async () => {
+    const c = await setup();
+    await saveExercise(c.db, c.row, { name: "Row", tracking: ["weight", "reps"], primary: ["Chest"], ancillary: [], note: "", weight_step: "10" });
+    await loadWorkout(c.db, "2026-10-01", c.workoutId);
+    await log(c, "2026-10-01", c.bench, [[15, 135]]); // past the top of both 8–12 and the ad-hoc 8–15
+    await log(c, "2026-10-01", c.row, [[15, 100]]);
+    await loadWorkout(c.db, "2026-10-03", c.workoutId, { weightStep: 2.5 });
+    expect((await targets(c, "2026-10-03", c.bench))[0]).toEqual([8, 137.5, "8"]); // the default passed in
+    expect(await targets(c, "2026-10-03", c.row)).toEqual([[8, 110, "8"]]); // its own step wins
+    await addExercises(c.db, "2026-10-02", [c.bench, c.row], { weightStep: 25 });
+    expect((await targets(c, "2026-10-02", c.bench))[0]).toEqual([8, 160, "8"]); // from 2026-10-01: 135 + 25
+    expect((await targets(c, "2026-10-02", c.row))[0]).toEqual([8, 110, "8"]);
+    const id = (await dayEntries(c.db, "2026-10-02")).find((lx) => lx.exercise.id === c.bench)!.id;
+    await autoregulateEntry(c.db, id, 1.25);
+    expect((await targets(c, "2026-10-02", c.bench))[0]).toEqual([8, 136.25, "8"]);
   });
 });
