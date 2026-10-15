@@ -60,8 +60,8 @@ route(/^\/routines\/new$/, (ctx) => routineForm(ctx, null));
 route(/^\/routines\/(\d+)$/, async (ctx) => routineForm(ctx, await getRoutine(ctx.db, Number(ctx.params[0]))));
 
 type RoutineStash = { errors: string[]; badTargets: Set<number>; form: { name: string; workout_ids: number[]; cycle_days: string; autoregulate: boolean; targets: Record<number, string> } };
-// Unsaved routine edits kept while visiting the preset page (restored on return), by path.
-type Draft = { name: string; ids: number[]; cycle: string; autoregulate: boolean; targets: Record<string, string> };
+// Unsaved routine edits kept while visiting a preset or workout page (restored on return), by path.
+type Draft = { name: string; ids: number[]; cycle: string; autoregulate: boolean; targets: Record<string, string>; tab: string };
 const drafts = new Map<string, Draft>();
 
 async function routineForm(ctx: Ctx, routine: Routine | null) {
@@ -227,7 +227,8 @@ function mountRoutineEditor(
       const w = byId.get(id)!;
       return `<li class="wx-card routine-item">
         <span class="routine-num">${i + 1}</span>
-        <div class="wx-title"><h3>${esc(w.name)}</h3><span class="picker-meta">${plural(w.count, "exercise")}</span></div>
+        <div class="wx-title"><h3><button type="button" class="routine-open" data-open="${id}" data-drag-ok
+          aria-label="Edit workout ${esc(w.name)}">${esc(w.name)}</button></h3><span class="picker-meta">${plural(w.count, "exercise")}</span></div>
         <div class="wx-actions">
           <button type="button" class="icon-btn danger" data-act="remove" data-i="${i}" aria-label="Remove ${esc(w.name)}">&times;</button>
         </div>
@@ -310,11 +311,7 @@ function mountRoutineEditor(
     const t = e.target as Element;
     if (t === presetSheet || t.closest("[data-close]")) return presetSheet.close();
     if (t.closest("[data-leave]")) {
-      // Keep unsaved edits while visiting the preset page; restored when we come back.
-      drafts.set(opts.draftKey, {
-        name: nameInput.value, ids: [...ids], cycle: cycleInput.value, autoregulate: autoregulateInput.checked,
-        targets: Object.fromEntries(targetInputs().map((i) => [i.name, i.value])),
-      });
+      saveDraft();
       return;
     }
     const btn = t.closest<HTMLElement>("[data-preset]");
@@ -329,16 +326,24 @@ function mountRoutineEditor(
     renderVolume();
   }, { signal });
 
+  // Keep unsaved edits while visiting a preset or workout page; restored when we come back.
+  function saveDraft() {
+    drafts.set(opts.draftKey, {
+      name: nameInput.value, ids: [...ids], cycle: cycleInput.value, autoregulate: autoregulateInput.checked,
+      targets: Object.fromEntries(targetInputs().map((i) => [i.name, i.value])),
+      tab: root.querySelector<HTMLElement>("[data-tab][aria-selected=true]")!.dataset.tab!,
+    });
+  }
   function restoreDraft() {
     const draft = drafts.get(opts.draftKey);
     drafts.delete(opts.draftKey);
-    if (!draft) return false;
+    if (!draft) return null;
     nameInput.value = draft.name;
     ids.splice(0, ids.length, ...draft.ids.filter((id) => byId.has(id)));
     cycleInput.value = draft.cycle;
     autoregulateInput.checked = draft.autoregulate;
     for (const input of targetInputs()) if (input.name in draft.targets) input.value = draft.targets[input.name];
-    return true;
+    return draft.tab;
   }
 
   // ----- Tabs -----
@@ -362,10 +367,17 @@ function mountRoutineEditor(
 
   list.addEventListener("click", (e) => {
     const btn = (e.target as Element).closest<HTMLButtonElement>("button[data-act]");
-    if (!btn) return;
-    if (btn.dataset.act !== "remove") return;
-    ids.splice(Number(btn.dataset.i), 1);
-    render();
+    if (btn) {
+      if (btn.dataset.act !== "remove") return;
+      ids.splice(Number(btn.dataset.i), 1);
+      return render();
+    }
+    // Tapping a workout's card opens it in the builder (user requirement, 2026-10-15); its Save
+    // and Back return here, with this routine's unsaved edits restored.
+    const open = (e.target as Element).closest("li")?.querySelector<HTMLElement>("[data-open]");
+    if (!open) return;
+    saveDraft();
+    navigate(href(`/workouts/${open.dataset.open}`, { next: opts.draftKey }));
   }, { signal });
 
   // Long-press a workout and drag it into place (user requirement; replaced the ↑/↓ buttons).
@@ -417,9 +429,9 @@ function mountRoutineEditor(
     });
   }, { signal });
 
-  const restored = restoreDraft();
+  const restoredTab = restoreDraft();
   render();
-  if (restored) showTab("volume");
+  if (restoredTab) showTab(restoredTab);
 }
 
 // ---------- Target presets ----------

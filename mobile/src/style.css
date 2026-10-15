@@ -350,6 +350,19 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .routine-item { display: flex; align-items: center; gap: 10px; }
 .routine-item .wx-title { flex: 1; min-width: 0; }
 .routine-item h3 { overflow-wrap: anywhere; }
+/* Tapping a routine's workout card opens the workout in the builder (views/routines.ts). */
+.routine-item { cursor: pointer; }
+.routine-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.routine-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
 /* Builder */
 .builder-list { list-style: none; margin: 0 0 12px; padding: 0; }
