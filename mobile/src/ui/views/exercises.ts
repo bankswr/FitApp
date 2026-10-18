@@ -115,8 +115,8 @@ type FormStash = { errors: string[]; form: ExerciseForm };
 // Set by "Save & add another" so the fresh form opens with the name field focused.
 let focusNameOnMount = false;
 
-// A new exercise opened with ?next= (e.g. from the workout builder's picker) returns there
-// instead of the list. The ids saved on the way, chained ones included, are kept per return
+// A form opened with ?next= returns there instead of the list or exercise page: a new exercise
+// from the workout builder's picker, or an edit from the day view's card tray. The new ids saved on the way, chained ones included, are kept per return
 // target for that screen to pick up.
 const createdFor = new Map<string, number[]>();
 export function takeCreatedExercises(target: string): number[] {
@@ -127,7 +127,7 @@ export function takeCreatedExercises(target: string): number[] {
 
 async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
   const nextParam = ctx.query.get("next");
-  const next = !exercise && nextParam?.startsWith("#/") ? nextParam : null;
+  const next = nextParam?.startsWith("#/") ? nextParam : null;
   const stashed = takeStash<FormStash>();
   const form: ExerciseForm = stashed?.form ?? (exercise
     ? {
@@ -163,7 +163,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
     tabbar: false,
     content: html`
       <header class="page-header">
-        ${exercise
+        ${exercise && !next
           ? html`<a class="back" href="#/exercises/${exercise.id}" aria-label="Back to ${exercise.name}">&larr;</a>`
           : html`<a class="back" href=${next ?? "#/exercises"} aria-label="Back">&larr;</a>`}
         <h1>${exercise ? "Edit exercise" : "New exercise"}</h1>
@@ -227,13 +227,13 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
         const result = await saveExercise(ctx.db, exercise?.id ?? null, input);
         if (result.ok) {
           flash(`Saved “${result.name}”.`);
-          // An edit returns to the exercise page; a new exercise goes back to the list (or the
-          // ?next= screen), or to a blank form to add another.
+          // An edit returns to the exercise page; a new exercise goes back to the list; either
+          // goes to the ?next= screen if given. "Save & add another" opens a blank form.
           const another = (e as SubmitEvent).submitter?.hasAttribute("data-another") ?? false;
           focusNameOnMount = another;
-          if (next) createdFor.set(next, [...(createdFor.get(next) ?? []), result.id]);
+          if (next && !exercise) createdFor.set(next, [...(createdFor.get(next) ?? []), result.id]);
           if (another) navigate(`#${currentPath()}`);
-          else returnTo(exercise ? `#/exercises/${exercise.id}` : next ?? "#/exercises");
+          else returnTo(next ?? (exercise ? `#/exercises/${exercise.id}` : "#/exercises"));
         } else {
           stash({ errors: result.errors, form: result.form } satisfies FormStash);
           await refresh();

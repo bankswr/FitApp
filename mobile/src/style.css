@@ -610,9 +610,9 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .log-card.swiping .card-body { transition: none; }
 .log-card.tray-open .card-body { transform: translateX(calc(-1 * var(--tray-w))); }
 /* Swipe tray: history, notes, AR, behind the card's right edge. */
-.log-card { --tray-w: 156px; }
+.log-card { --tray-w: 208px; }
 .card-tray { position: absolute; inset: 0 0 0 auto; width: var(--tray-w); display: flex; }
-.log-card:not(:has([data-ar])) { --tray-w: 104px; }
+.log-card:not(:has([data-ar])) { --tray-w: 156px; }
 .tray-btn {
   flex: 1 1 0;
   min-width: 0;
@@ -629,6 +629,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .tray-btn.tray-history { color: var(--blue); }
 .tray-btn.tray-notes { color: var(--accent); }
 .tray-btn.tray-ar { color: var(--text); }
+.tray-btn.tray-edit { color: var(--muted); text-decoration: none; }
 .tray-btn:active { background: var(--border); }
 .tray-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Collapsed (tap the name; checking off the last set): the name, sets done and ×. */
@@ -1040,7 +1041,20 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   letter-spacing: 0.05em;
   color: var(--muted);
 }
-.log-notes { margin: -2px 0 10px; }
+.log-notes {
+  display: block;
+  width: 100%;
+  margin: -2px 0 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.log-notes .note { display: block; }
+.log-notes:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 .superset-btn { display: inline-flex; align-items: center; gap: 2px; padding: 0 10px; }
 .superset-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .history-day .note { margin: 2px 0 6px; }

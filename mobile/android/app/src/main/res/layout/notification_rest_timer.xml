@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The running rest notification, collapsed: "Rest Timer" beside a large countdown. Collapsed
+     custom views get about 48dp of height, so the two share one row. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Rest Timer"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title" />
+
+    <Chronometer
+        android:id="@+id/rest_countdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:includeFontPadding="false"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title"
+        android:textSize="34sp"
+        android:fontFeatureSettings="tnum" />
+</LinearLayout>

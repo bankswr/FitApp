@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The running rest notification, expanded: "Rest Timer" over a large countdown. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Rest Timer"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title" />
+
+    <Chronometer
+        android:id="@+id/rest_countdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.Compat.Notification.Title"
+        android:includeFontPadding="false"
+        android:textSize="56sp"
+        android:fontFeatureSettings="tnum" />
+</LinearLayout>

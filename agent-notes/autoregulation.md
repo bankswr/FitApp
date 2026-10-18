@@ -1,7 +1,7 @@
 # Autoregulation
 How autoregulation sets rep and weight targets from the previous session, and how deload days fit in. Mobile app only (`mobile/src/logic/autoregulation.ts`), not in Flask.
 
-Last updated: 2026-10-15
+Last updated: 2026-10-18
 
 ## Rules (user requirement, 2026-10-04)
 - **One switch in Settings (user requirement, 2026-10-10):** **Autoregulation** on the Settings screen, per device (`fitapp.autoregulate` in localStorage via `ui/prefs.ts`, off by default). The day view passes it to `loadRoutine` / `loadWorkout` / `addExercises` as an `autoregulate` argument (default false, so the logic stays Flask-parity when off). It replaced the per-routine checkbox: `routine.autoregulate` is still stored, imported and exported, and kept through edits by a hidden field in the routine editor, but nothing reads it.
@@ -19,7 +19,7 @@ Last updated: 2026-10-15
 - Bodyweight (no weight logged or targeted, or the exercise doesn't track weight): reps only, held at the range maximum instead of adding weight. The user didn't rule on this case explicitly.
 
 ## AR button on day cards (user requirement, 2026-10-10)
-- Each day card for an exercise that tracks reps has an **AR** button: since 2026-10-15 the wrench in the card's swipe tray (see `stack-decisions.md`). It sets that entry's targets by the rules above (`autoregulateEntry` in `logic/day.ts`), from the **exercise's** latest non-deload entry before that day, from any source (ad hoc or a workout; the workout doesn't matter). Sets match by position.
+- Each day card for an exercise that tracks reps has an **AR** button: since 2026-10-15 in the card's swipe tray, a dial icon since 2026-10-18 (the wrench there now edits the exercise) (see `stack-decisions.md`). It sets that entry's targets by the rules above (`autoregulateEntry` in `logic/day.ts`), from the **exercise's** latest non-deload entry before that day, from any source (ad hoc or a workout; the workout doesn't matter). Sets match by position.
 - It sets **targets only** (`target_reps`, `target_weight`, shown as placeholders), never logged values; the user chose this over filling the fields.
 - **Completed sets are skipped, and so is each target whose field already has a value** (user requirement): a typed weight keeps that set's weight target, but its reps target still updates.
 - The range is the set's own target range, 8–15 when it has none (an ad-hoc exercise). Sets past the reference's count keep their targets. No earlier entry → nothing changes and a toast says so. Works on any day, whether or not the Settings switch is on, and **replaces** existing targets (e.g. ones a workout's autoregulation set) with the exercise-based ones (user requirement).

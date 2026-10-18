@@ -8,6 +8,8 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.SystemClock;
+import android.widget.RemoteViews;
 import androidx.core.app.NotificationCompat;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -87,14 +89,19 @@ public class RestTimerPlugin extends Plugin {
     }
 
     private static Notification runningNotification(Context context, long end) {
+        // "Rest Timer" over a large countdown (user requirement, 2026-10-18). The standard layouts
+        // only show a chronometer small in the header, so the body is a custom view (collapsed: one
+        // row, as the height is capped; expanded: stacked, bigger).
+        long base = SystemClock.elapsedRealtime() + (end - System.currentTimeMillis());
+        RemoteViews body = countdownView(context, R.layout.notification_rest_timer, base);
+        RemoteViews big = countdownView(context, R.layout.notification_rest_timer_big, base);
         return new NotificationCompat.Builder(context, CHANNEL_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_timer)
-            .setContentTitle("Resting")
-            .setContentText("Next set when the countdown ends")
-            .setWhen(end)
-            .setShowWhen(true)
-            .setUsesChronometer(true)
-            .setChronometerCountDown(true)
+            .setContentTitle("Rest Timer")
+            .setStyle(new NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomContentView(body)
+            .setCustomBigContentView(big)
+            .setShowWhen(false)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -102,6 +109,13 @@ public class RestTimerPlugin extends Plugin {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openApp(context))
             .build();
+    }
+
+    private static RemoteViews countdownView(Context context, int layout, long base) {
+        RemoteViews view = new RemoteViews(context.getPackageName(), layout);
+        view.setChronometer(R.id.rest_countdown, base, null, true);
+        view.setChronometerCountDown(R.id.rest_countdown, true);
+        return view;
     }
 
     static PendingIntent openApp(Context context) {

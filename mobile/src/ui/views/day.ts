@@ -35,11 +35,12 @@ const FIELDS: Record<TrackingMode, { field: keyof LogSet; label: string; inputmo
 
 const linkIcon = html`<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor"
   stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/></svg>`;
-// The swipe tray's icons: history, notes, autoregulate.
+// The swipe tray's icons: history, notes, autoregulate (dial), edit the exercise (wrench).
 const trayIcon = (paths: ReturnType<typeof svg>) => html`<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"
   fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 const bookIcon = trayIcon(svg`<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>`);
 const pencilIcon = trayIcon(svg`<path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/><path d="m15 5 4 4"/>`);
+const dialIcon = trayIcon(svg`<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>`);
 const wrenchIcon = trayIcon(svg`<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`);
 
 /** A card's sets checked off, e.g. "2/4 ✓", shown while it's collapsed. */
@@ -144,7 +145,8 @@ async function dayView(ctx: Ctx, date: string) {
 
   // Collapsing (user requirement, 2026-10-15): tapping the name toggles the card down to its
   // name and sets done; checking off its last set collapses it. Remembered per device (ui/prefs.ts).
-  // History, notes and AR sit in a tray revealed by swiping the card left.
+  // History, notes, AR and Edit sit in a tray revealed by swiping the card left. Tapping the
+  // notes on the card opens the notes sheet too.
   const collapsed = collapsedEntries();
   const card = (lx: LogEntry) => html`
     <section class="log-card${collapsed.has(lx.id) ? " is-collapsed" : ""}" id="lx-${lx.id}" data-lx=${lx.id}>
@@ -156,7 +158,9 @@ async function dayView(ctx: Ctx, date: string) {
                 aria-haspopup="dialog" aria-label="Notes for ${lx.exercise.name}" title="Notes">${pencilIcon}</button>
         ${lx.exercise.tracks.reps ? html`
           <button type="button" class="tray-btn tray-ar" data-ar=${lx.id}
-                  aria-label="Autoregulate ${lx.exercise.name} from its last session" title="Autoregulate">${wrenchIcon}</button>` : ""}
+                  aria-label="Autoregulate ${lx.exercise.name} from its last session" title="Autoregulate">${dialIcon}</button>` : ""}
+        <a class="tray-btn tray-edit" href=${href(`/exercises/${lx.exercise.id}/edit`, { next: `#${currentPath()}` })}
+           aria-label="Edit ${lx.exercise.name}" title="Edit exercise">${wrenchIcon}</a>
       </div>
       <div class="card-body" id="lx-body-${lx.id}">
       <div class="log-head">
@@ -173,10 +177,12 @@ async function dayView(ctx: Ctx, date: string) {
         </div>
       </div>
       ${lx.exercise.note || lx.note ? html`
-        <div class="log-notes">
-          ${lx.exercise.note ? html`<p class="note exercise-note"><span class="note-kind">Every time</span>${lx.exercise.note}</p>` : ""}
-          ${lx.note ? html`<p class="note session-note"><span class="note-kind">This session</span>${lx.note}</p>` : ""}
-        </div>` : ""}
+        <button type="button" class="log-notes" data-notes=${lx.id} data-name=${lx.exercise.name} data-drag-ok
+                data-exercise-note=${lx.exercise.note ?? ""} data-session-note=${lx.note ?? ""}
+                aria-haspopup="dialog" aria-label="Edit notes for ${lx.exercise.name}">
+          ${lx.exercise.note ? html`<span class="note exercise-note"><span class="note-kind">Every time</span>${lx.exercise.note}</span>` : ""}
+          ${lx.note ? html`<span class="note session-note"><span class="note-kind">This session</span>${lx.note}</span>` : ""}
+        </button>` : ""}
       <div class="log-grid" style="--cols: ${lx.exercise.modes.length}">
         <div class="log-row log-labels" aria-hidden="true">
           <span>Set</span>${lx.exercise.modes.map((m) => html`<span>${FIELDS[m].label}${m === "reps" ? repRangeNote(lx) : ""}</span>`)}<span>Done</span>
@@ -250,7 +256,7 @@ async function dayView(ctx: Ctx, date: string) {
           ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
         </div>
         ${blocks.length ? html`
-          <p class="hint reorder-hint">Swipe an exercise left for history, notes and autoregulation.${blocks.length > 1
+          <p class="hint reorder-hint">Swipe an exercise left for history, notes, autoregulation and editing.${blocks.length > 1
             ? html`<br>Long-press an exercise, or a workout’s name, to drag it.` : ""}</p>
           <div class="log-list" id="log-list">
             ${segments.map((seg) => (seg.w ? workoutBlock(seg.w, seg.blocks) : seg.blocks.map(blockHtml)))}

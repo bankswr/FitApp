@@ -1,7 +1,7 @@
 # Mobile app plan
 Decision and constraints for turning FitApp into a standalone Android/iPhone app.
 
-Last updated: 2026-10-15 (schema v5; port complete on Android; iPhone web-app build done, hosting pending)
+Last updated: 2026-10-18 (app icon from IconKitchen; schema v5; port complete on Android; iPhone web-app build done, hosting pending)
 
 ## Decision (user, 2026-09-30)
 - **Everything runs on the phone.** The Python logic is ported to TypeScript, with an on-device SQLite database, wrapped with **Capacitor**. The existing HTML/CSS/JS is reused as far as possible.
@@ -72,12 +72,13 @@ Last updated: 2026-10-15 (schema v5; port complete on Android; iPhone web-app bu
   - Attach the signed APK to a GitHub release for friends.
   - iPhone PWA: a stable HTTPS host (the build side is done, see below). The user must decide on a public repo for GitHub Pages versus another host.
   - Test the PWA on the user's iPad: install, offline launch, share-sheet export, long-press drag, safe-area padding.
-  - App icon and a notification icon (Capacitor defaults for now, per the user).
+  - A notification icon (Capacitor default for now, per the user). The app icon is done (below).
   - Retire Flask once the user has moved their data (`scripts/export_for_mobile.py`, then Import).
 
 ## iPhone web app (PWA, built 2026-10-01)
 - **The host is only needed to install and to update** (user's point, 2026-10-01). After the first launch every file is on the phone, and the app runs with the host gone. But the host's address must never change: iOS ties the data to it, and updates come from it. If iOS evicts the cached files under storage pressure, the app can't start again until the host is reachable.
-- `public/manifest.webmanifest` and the Apple tags in `index.html` (`apple-touch-icon`, `black-translucent` status bar so `env(safe-area-inset-*)` pads the content). The icons in `public/icons/` are a placeholder dumbbell (generated with PIL), not final art.
+- `public/manifest.webmanifest` and the Apple tags in `index.html` (`apple-touch-icon`, `black-translucent` status bar so `env(safe-area-inset-*)` pads the content). The icons in `public/icons/` (plain, maskable, favicon) come from the user's IconKitchen export.
+- **App icon (2026-10-18):** the user's IconKitchen export (teal/black diamond pattern, white dumbbell). Android uses its adaptive icon (`mipmap-*/ic_launcher_{background,foreground,monochrome}.png`, `mipmap-anydpi-v26/ic_launcher.xml`); `ic_launcher_round` reuses the same files because IconKitchen makes no separate round icon. Capacitor's default vector icon and `ic_launcher_background` colour were removed. To change the icon, export again from IconKitchen and copy its `android/res/` and `web/` files over the same names.
 - **Service worker:** `mobile/sw.js` is a template. The `fitapp-service-worker` plugin in `vite.config.ts` writes `dist/sw.js` after each build with the list of every file in `dist/` and a version hashed from their contents. It caches everything at install and serves from the cache, falling back to the network.
   - It deliberately doesn't call `skipWaiting`: a new version takes over at the next launch after every window of the old one has closed, so a running app never loses chunks it still lazy-loads (`web-*.js`). The old cache is deleted on activation. Verified in headless Chromium.
   - It's registered only in the web build (`initWebApp` in `ui/native.ts`, `import.meta.env.PROD`, not native), so the Android APK and the dev server never use it. `initWebApp` also calls `navigator.storage.persist()`.
