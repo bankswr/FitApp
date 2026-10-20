@@ -26,6 +26,11 @@
 
         <!-- End of a rest (RestTimerPlugin) -->
         <receiver android:name=".RestAlarmReceiver" android:exported="false" />
+        <!-- Rest-over chime in the background: a media foreground service may take audio focus -->
+        <service
+            android:name=".RestChimeService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -45,4 +50,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 </manifest>

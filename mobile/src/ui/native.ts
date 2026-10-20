@@ -83,7 +83,25 @@ export function alarmHaptic() {
 // While a countdown runs, a notification shows it (status bar and lock screen), and an alarm
 // at the end sounds even when the phone is asleep. Set up when the countdown starts, not when
 // the app goes to the background: JS can be paused before a call made then gets through.
-const RestTimer = registerPlugin<{ start(o: { endsAt: number }): Promise<void>; stop(): Promise<void> }>("RestTimer");
+const RestTimer = registerPlugin<{
+  start(o: { endsAt: number }): Promise<void>;
+  stop(): Promise<void>;
+  chime(): Promise<void>;
+}>("RestTimer");
+
+/**
+ * Play the rest-over chime natively, which pauses other audio (music) for it and resumes it after.
+ * False when there is no native chime (browser / iPhone web app) or it failed: use Web Audio then.
+ */
+export async function nativeChime(): Promise<boolean> {
+  if (!isNative) return false;
+  try {
+    await RestTimer.chime();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Show the countdown and set the end alarm (replacing any earlier one). */
 export async function showRestTimer(endsAt: number): Promise<void> {

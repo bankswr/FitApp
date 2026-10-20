@@ -25,7 +25,9 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "RestTimer")
 public class RestTimerPlugin extends Plugin {
     static final String CHANNEL_RUNNING = "rest_timer";
-    static final String CHANNEL_DONE = "rest_over";
+    // Silent: RestChime plays the sound (2026-10-20). "rest_over" was the old channel with a sound.
+    static final String CHANNEL_DONE = "rest_alert";
+    private static final String CHANNEL_DONE_OLD = "rest_over";
     static final int RUNNING_ID = 101;
     static final int DONE_ID = 102;
 
@@ -57,6 +59,13 @@ public class RestTimerPlugin extends Plugin {
         call.resolve();
     }
 
+    /** The rest-over chime while the app is on screen (pauses other audio meanwhile). */
+    @PluginMethod
+    public void chime(PluginCall call) {
+        RestChime.play(getContext(), null);
+        call.resolve();
+    }
+
     @PluginMethod
     public void stop(PluginCall call) {
         cancelAll(getContext());
@@ -80,12 +89,33 @@ public class RestTimerPlugin extends Plugin {
         running.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         running.setShowBadge(false);
         NotificationChannel done = new NotificationChannel(CHANNEL_DONE, "Rest over", NotificationManager.IMPORTANCE_HIGH);
-        done.setDescription("Sound and vibration when a rest ends");
+        done.setDescription("Alert and vibration when a rest ends (the app plays the chime)");
+        done.setSound(null, null);
         done.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         done.enableVibration(true);
         done.setVibrationPattern(new long[] { 0, 400, 200, 400, 200, 400 });
         notifications(context).createNotificationChannel(running);
         notifications(context).createNotificationChannel(done);
+        notifications(context).deleteNotificationChannel(CHANNEL_DONE_OLD);
+    }
+
+    /** The "Rest over" alert: vibration only, the chime is RestChime's. */
+    static Notification restOverNotification(Context context) {
+        return restOverBuilder(context).build();
+    }
+
+    static NotificationCompat.Builder restOverBuilder(Context context) {
+        return new NotificationCompat.Builder(context, CHANNEL_DONE)
+            .setSmallIcon(R.drawable.ic_stat_timer)
+            .setContentTitle("Rest over")
+            .setContentText("Time for your next set.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setSound(null)
+            .setVibrate(new long[] { 0, 400, 200, 400, 200, 400 })
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setContentIntent(openApp(context));
     }
 
     private static Notification runningNotification(Context context, long end) {

@@ -3,11 +3,12 @@ package org.fitapp.app;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 /**
  * The end of a rest (RestTimerPlugin's alarm): removes the countdown notification and, unless the
- * app is on screen (its own alarm sounds then), posts a "Rest over" alert with sound and vibration.
+ * app is on screen (its own alarm sounds then), posts a "Rest over" alert with vibration and plays
+ * the chime, pausing other audio meanwhile (RestChimeService).
  */
 public class RestAlarmReceiver extends BroadcastReceiver {
     @Override
@@ -16,21 +17,17 @@ public class RestAlarmReceiver extends BroadcastReceiver {
         if (MainActivity.inForeground) return;
         RestTimerPlugin.ensureChannels(context);
         try {
-            RestTimerPlugin.notifications(context).notify(RestTimerPlugin.DONE_ID,
-                new NotificationCompat.Builder(context, RestTimerPlugin.CHANNEL_DONE)
-                    .setSmallIcon(R.drawable.ic_stat_timer)
-                    .setContentTitle("Rest over")
-                    .setContentText("Time for your next set.")
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setDefaults(NotificationCompat.DEFAULT_SOUND)
-                    .setVibrate(new long[] { 0, 400, 200, 400, 200, 400 })
-                    .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                    .setAutoCancel(true)
-                    .setContentIntent(RestTimerPlugin.openApp(context))
-                    .build());
-        } catch (SecurityException e) {
-            // Notifications not allowed: nothing to show.
+            ContextCompat.startForegroundService(context, new Intent(context, RestChimeService.class));
+            return;
+        } catch (RuntimeException e) {
+            // Service start refused: alert and chime without it (other audio may keep playing).
         }
+        try {
+            RestTimerPlugin.notifications(context).notify(RestTimerPlugin.DONE_ID, RestTimerPlugin.restOverNotification(context));
+        } catch (SecurityException e) {
+            // Notifications not allowed: the chime still sounds.
+        }
+        PendingResult pending = goAsync();
+        RestChime.play(context, pending::finish);
     }
 }

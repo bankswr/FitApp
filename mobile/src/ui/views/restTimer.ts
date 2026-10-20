@@ -4,7 +4,7 @@
 // set that qualifies is checked off (see restAfterSets for the superset rule).
 import { html } from "lit-html";
 import { formatDuration } from "../../logic/text";
-import { alarmHaptic, clearRestTimer, prepareRestAlarms, showRestTimer } from "../native";
+import { alarmHaptic, clearRestTimer, nativeChime, prepareRestAlarms, showRestTimer } from "../native";
 
 const KEY = "fitapp.restTimer";
 const DEFAULTS = { duration: 90, auto: true, endsAt: null as number | null };
@@ -104,6 +104,10 @@ function unlockAudio() {
 
 function alarm() {
   alarmHaptic();
+  void nativeChime().then((played) => played || webChime());
+}
+
+function webChime() {
   if (!audio) return;
   for (let i = 0; i < 3; i++) {
     const t = audio.currentTime + i * 0.25;
