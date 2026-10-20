@@ -494,6 +494,11 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   cursor: pointer;
 }
 .picker-meta { color: var(--muted); font-size: 0.85rem; flex-shrink: 0; }
+/* Planned set totals beside workout / routine names and the builder's Exercises label */
+.set-count { color: var(--muted); font-size: 0.85rem; font-weight: 400; white-space: nowrap; }
+.routine-summary .routine-sets { margin-left: auto; }
+.routine-summary .routine-sets + .chevron { margin-left: 0; }
+.routine-total { margin: 0 0 6px; font-weight: 600; }
 
 /* Tappable cards */
 .card-link { display: block; color: inherit; text-decoration: none; }

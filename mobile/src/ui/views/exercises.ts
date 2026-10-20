@@ -13,6 +13,7 @@ import { exerciseFilter, filterControls, type FilterState } from "../exerciseFil
 import { weightStepDefault } from "../prefs";
 import { mountWeightStep, weightStepField } from "../weightStep";
 import { historyList } from "./history";
+import { HELP } from "../help";
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -167,6 +168,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
           ? html`<a class="back" href="#/exercises/${exercise.id}" aria-label="Back to ${exercise.name}">&larr;</a>`
           : html`<a class="back" href=${next ?? "#/exercises"} aria-label="Back">&larr;</a>`}
         <h1>${exercise ? "Edit exercise" : "New exercise"}</h1>
+        <button type="submit" class="button" form="exercise-form">Save</button>
       </header>
       ${errors.length ? html`<div class="errors" role="alert"><ul>${errors.map((e) => html`<li>${e}</li>`)}</ul></div>` : ""}
       <form class="form" id="exercise-form" novalidate>
@@ -176,7 +178,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
         </div>
         <fieldset class="field">
           <legend>Track</legend>
-          <p class="hint">What you'll log for each set.</p>
+          <p class="hint">${HELP.exerciseForm.tracking}</p>
           <div class="chips grid">
             ${TRACKING_MODES.map((mode) => html`
               <label class="chip">
@@ -187,19 +189,17 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
         </fieldset>
         <div class="field" id="weight-step-field" ?hidden=${!form.tracking.includes("weight")}>
           <label for="weight_step">Autoregulation weight step</label>
-          <p class="hint">How much autoregulation moves this exercise's weight. Leave blank to use the Settings
-            default (${formatNumber(weightStepDefault())}&nbsp;lb).</p>
+          <p class="hint">${HELP.exerciseForm.weightStep(weightStepDefault())}</p>
           ${weightStepField({ id: "weight_step", name: "weight_step", value: form.weight_step ?? "",
             placeholder: formatNumber(weightStepDefault()), label: "Weight step" })}
         </div>
-        ${muscleField("primary", "Primary muscle groups", "The main muscles this exercise targets.")}
-        ${muscleField("ancillary", "Ancillary muscle groups", "Supporting muscles (optional).")}
+        ${muscleField("primary", "Primary muscle groups", HELP.exerciseForm.primary)}
+        ${muscleField("ancillary", "Ancillary muscle groups", HELP.exerciseForm.ancillary)}
         <div class="field">
           <label for="note">Note</label>
-          <p class="hint">Shown every time you do this exercise, e.g. seat height or form cues (optional).</p>
+          <p class="hint">${HELP.exerciseForm.note}</p>
           <textarea id="note" name="note" rows="3" maxlength=${NOTE_MAX_LENGTH} .value=${form.note}></textarea>
         </div>
-        <button type="submit" class="button block">Save exercise</button>
         ${exercise ? "" : html`<button type="submit" class="button subtle block" data-another>Save &amp; add another</button>`}
       </form>
       ${exercise ? deleteButton(exercise, blocked, true) : ""}`,

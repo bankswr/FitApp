@@ -8,6 +8,7 @@ import { autoregulateOn, quickFillOn, setAutoregulate, setQuickFill, setWeightSt
 import { mountWeightStep, weightStepField } from "../weightStep";
 import { backupSettings } from "./backup";
 import { mountRestTimerSettings, restTimerSettings } from "./restTimer";
+import { HELP } from "../help";
 
 route(/^\/settings$/, async (ctx) => {
   const backup = await backupSettings(ctx);
@@ -23,8 +24,7 @@ route(/^\/settings$/, async (ctx) => {
           <input type="checkbox" id="quick-fill" .checked=${quickFillOn()}>
           <span>Copy the first value into the remaining sets</span>
         </label>
-        <p class="hint">The first value you type in a column fills that column on the exercise's other sets:
-          weight and reps on the day view, every target in the workout builder. Turn it off to fill each set yourself.</p>
+        <p class="hint">${HELP.settings.quickFill}</p>
       </section>
       <section class="card settings-card">
         <h2>Autoregulation</h2>
@@ -32,15 +32,11 @@ route(/^\/settings$/, async (ctx) => {
           <input type="checkbox" id="autoregulate" .checked=${autoregulateOn()}>
           <span>Set targets from the last session</span>
         </label>
-        <p class="hint">When you add to a day, rep and weight targets come from last time: one more rep if you hit
-          the target, one weight step up past the top of the rep range, one step down below the bottom (8–15 when a set
-          has no range). A routine or workout goes by the last time that workout was done; an exercise added on its own
-          goes by its own last session. Deload days are skipped. The wrench in a card's swipe tray does this for one
-          exercise any time.</p>
+        <p class="hint">${HELP.settings.autoregulation}</p>
         <label class="settings-label" for="weight-step">Weight step</label>
         ${weightStepField({ id: "weight-step", name: "weight_step", value: formatNumber(weightStepDefault()),
           placeholder: formatNumber(WEIGHT_STEP), label: "Weight step" })}
-        <p class="hint" id="weight-step-hint">How much the weight goes up or down. An exercise can set its own on its edit page.</p>
+        <p class="hint" id="weight-step-hint">${HELP.settings.weightStep}</p>
       </section>
       <h2 class="settings-heading">Backup</h2>
       ${backup.content}`,

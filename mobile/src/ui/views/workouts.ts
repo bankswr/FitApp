@@ -6,7 +6,7 @@ import { wrapIntoDayWorkout } from "../../logic/dayWorkouts";
 import { exercisePickerData, type PickerOption } from "../../logic/exercises";
 import {
   deleteWorkout, getWorkout, groupBlocks, type Item, listWorkouts, saveWorkout, slotSummary, type Workout, workoutDeleteBlocker,
-  workoutToItems,
+  workoutSetCount, workoutToItems, setsLabel,
 } from "../../logic/workouts";
 import { type Ctx, currentPath, flash, href, navigate, refresh, returnTo, route, stash, takeStash } from "../app";
 import { cardCopyButton, copyName } from "../copy";
@@ -16,6 +16,7 @@ import { exerciseFilter, filterControls } from "../exerciseFilter";
 import { formatTime, parseTime } from "../time";
 import { takeCreatedExercises } from "./exercises";
 import { restSeconds } from "./restTimer";
+import { HELP } from "../help";
 
 const DELETE_DETAIL = "This permanently removes the workout plan. Days you’ve already logged keep their sets.";
 
@@ -54,7 +55,7 @@ route(/^\/workouts$/, async (ctx) => {
         <ul class="card-list">
           ${workouts.map((w) => html`
             <li class="card-wrap">
-              <a class="card card-link" href="#/workouts/${w.id}"><h2>${w.name}</h2>${workoutSummaryList(w)}</a>
+              <a class="card card-link" href="#/workouts/${w.id}"><h2>${w.name} <span class="set-count">${setsLabel(workoutSetCount(w))}</span></h2>${workoutSummaryList(w)}</a>
               ${cardCopyButton("workouts", w.id, w.name)}
               <button type="button" class="icon-btn danger card-delete" aria-label="Delete ${w.name}"
                       data-confirm-delete="workout:${w.id}" data-name=${w.name} data-detail=${DELETE_DETAIL}
@@ -112,8 +113,8 @@ async function builder(ctx: Ctx, workout: Workout | null) {
           <input id="name" name="name" type="text" maxlength="100" required autocomplete="off" autocapitalize="words" placeholder="e.g. Push Day" .value=${name}>
         </div>
         <div class="field">
-          <span class="field-label">Exercises</span>
-          <p class="hint reorder-hint" id="builder-hint" hidden>Long-press an exercise to drag it into a new order.</p>
+          <span class="field-label">Exercises <span class="set-count" id="builder-sets"></span></span>
+          <p class="hint reorder-hint" id="builder-hint" hidden>${HELP.workoutBuilder.drag}</p>
           <ol class="builder-list" id="builder-list"></ol>
           <p class="empty small" id="builder-empty">No exercises yet. Tap <strong>+ Add</strong> to pick some.</p>
         </div>
@@ -199,6 +200,7 @@ function mountBuilder(
   const list = root.querySelector<HTMLElement>("#builder-list")!;
   const empty = root.querySelector<HTMLElement>("#builder-empty")!;
   const hint = root.querySelector<HTMLElement>("#builder-hint")!;
+  const setCount = root.querySelector<HTMLElement>("#builder-sets")!;
   const picker = root.querySelector<HTMLDialogElement>("#picker")!;
   const esc = (s: unknown) =>
     String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -264,7 +266,7 @@ function mountBuilder(
           <button type="button" class="icon-btn danger" data-act="remove" data-i="${i}" aria-label="Remove ${esc(ex.name)}">&times;</button>
         </div>
       </div>
-      <p class="set-hint">Targets are optional.</p>
+      <p class="set-hint">${esc(HELP.workoutBuilder.targets)}</p>
       <div class="set-head" style="grid-template-columns: ${gridColumns(item)}" aria-hidden="true">
         ${heads.map((h) => `<span>${h}</span>`).join("")}
       </div>
@@ -305,6 +307,7 @@ function mountBuilder(
     }).join("");
     empty.hidden = items.length > 0;
     hint.hidden = ranges.length < 2;
+    setCount.textContent = items.length ? setsLabel(items.reduce((n, item) => n + item.sets.length, 0)) : "";
   }
 
   // A link after the last exercise is meaningless and would silently re-link whatever gets added next.

@@ -5,6 +5,7 @@
 import { html } from "lit-html";
 import { formatDuration } from "../../logic/text";
 import { alarmHaptic, clearRestTimer, nativeChime, prepareRestAlarms, showRestTimer } from "../native";
+import { HELP } from "../help";
 
 const KEY = "fitapp.restTimer";
 const DEFAULTS = { duration: 90, auto: true, endsAt: null as number | null };
@@ -46,7 +47,7 @@ export const restTimerSettings = () => html`
       <input type="checkbox" id="timer-auto">
       <span>Start automatically when a set is completed</span>
     </label>
-    <p class="hint">In a superset, it starts only after the last exercise of each round. It never starts after the day's last set.</p>
+    <p class="hint">${HELP.settings.restTimerAuto}</p>
   </section>`;
 
 /** Each change re-reads the stored state, so a countdown that is already running is kept. */

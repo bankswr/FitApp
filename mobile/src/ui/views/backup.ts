@@ -7,6 +7,7 @@ import { TABLES } from "../../db/schema";
 import { historyDate, todayIso } from "../../logic/text";
 import { type Ctx, flash, refresh } from "../app";
 import { saveFile } from "../native";
+import { HELP } from "../help";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const summary = (n: Record<string, number>) =>
@@ -28,14 +29,12 @@ export async function backupSettings(ctx: Ctx) {
     content: html`
       <section class="card backup-card">
         <h2>Export backup</h2>
-        <p class="hint">Saves all your data (${summary(counts)}) to a file. Keep a recent copy somewhere
-          safe, off this phone: there's no cloud copy, so it's what protects you if the phone is lost or reset.</p>
+        <p class="hint">${HELP.settings.exportBackup(summary(counts))}</p>
         <button type="button" class="button block" id="export">Export backup</button>
       </section>
       <section class="card backup-card">
         <h2>Import backup</h2>
-        <p class="hint"><strong>Replaces everything</strong> in the app with the backup's data. You'll see what the
-          file contains and confirm before anything changes. If the file isn't a valid backup, nothing changes.</p>
+        <p class="hint">${HELP.settings.importBackup}</p>
         <label class="button subtle block file-button">
           Choose backup file…
           <input type="file" id="import" accept=".json,application/json" hidden>

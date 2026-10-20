@@ -8,10 +8,11 @@ import {
   deleteRoutine, getRoutine, listRoutines, type Routine, type RoutineForm, saveRoutine, targetTexts,
 } from "../../logic/routines";
 import { formatNumber, MUSCLE_SET_WEIGHTS, truncate1 } from "../../logic/text";
-import { listWorkouts, workoutMuscleSets } from "../../logic/workouts";
+import { listWorkouts, setsLabel, workoutMuscleSets, workoutSetCount } from "../../logic/workouts";
 import { type Ctx, currentPath, flash, href, navigate, refresh, route, stash, takeStash } from "../app";
 import { cardCopyButton, copyName } from "../copy";
 import { longPressReorder } from "../dragReorder";
+import { HELP } from "../help";
 
 const ROUTINE_DELETE_DETAIL = "This removes the routine only. Its workouts and your logged days stay.";
 
@@ -25,7 +26,8 @@ function registerRoutineDelete(ctx: Ctx, r: { id: number }) {
 
 route(/^\/routines$/, async (ctx) => {
   const routines = await listRoutines(ctx.db);
-  const names = new Map((await listWorkouts(ctx.db)).map((w) => [w.id, w.name]));
+  const workouts = new Map((await listWorkouts(ctx.db)).map((w) => [w.id, { name: w.name, sets: workoutSetCount(w) }]));
+  const routineSets = (ids: number[]) => ids.reduce((n, id) => n + (workouts.get(id)?.sets ?? 0), 0);
   for (const r of routines) registerRoutineDelete(ctx, r);
   return {
     title: "Routines",
@@ -40,11 +42,12 @@ route(/^\/routines$/, async (ctx) => {
           ${routines.map((r) => html`
             <li class="card-wrap">
               <div class="card card-stretch">
-                <h2><a class="card-cover" href="#/routines/${r.id}">${r.name}</a></h2>
+                <h2><a class="card-cover" href="#/routines/${r.id}">${r.name}</a> <span class="set-count">${setsLabel(routineSets(r.workout_ids))}</span></h2>
                 <ol class="routine-summary">
                   ${r.workout_ids.map((wid, i) => html`
                     <li><a href=${href(`/workouts/${wid}`, { next: "#/routines" })}>
-                      <span class="routine-num">${i + 1}</span><span>${names.get(wid)}</span><span class="chevron" aria-hidden="true">&rsaquo;</span>
+                      <span class="routine-num">${i + 1}</span><span>${workouts.get(wid)?.name}</span>
+                      <span class="picker-meta routine-sets">${setsLabel(workouts.get(wid)?.sets ?? 0)}</span><span class="chevron" aria-hidden="true">&rsaquo;</span>
                     </a></li>`)}
                 </ol>
               </div>
@@ -77,7 +80,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
   const badTargets = stashed?.badTargets ?? new Set<number>();
   const muscles = await orderedMuscleGroups(ctx.db);
   const workouts = await listWorkouts(ctx.db);
-  const options = workouts.map((w) => ({ id: w.id, name: w.name, count: w.slots.length, muscles: workoutMuscleSets(w) }));
+  const options = workouts.map((w) => ({ id: w.id, name: w.name, count: w.slots.length, sets: workoutSetCount(w), muscles: workoutMuscleSets(w) }));
   const presets = await listPresets(ctx.db);
   const here = `#${currentPath()}`;
   const cycleInvalid = errors.length > 0 && !(/^\d+$/.test(cycleDays) && Number(cycleDays) >= 1 && Number(cycleDays) <= 365);
@@ -109,7 +112,8 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
           <button type="button" role="tab" id="tab-volume" aria-controls="panel-volume" aria-selected="false" tabindex="-1" data-tab="volume">Volume Planning</button>
         </div>
         <div class="field" role="tabpanel" id="panel-workouts" aria-labelledby="tab-workouts">
-          <p class="hint">In the order you do them. A workout can appear more than once. Long-press a workout to drag it into a new order.</p>
+          <p class="routine-total" id="routine-total"></p>
+          <p class="hint">${HELP.routineEditor.workouts}</p>
           <ol class="builder-list" id="routine-list"></ol>
           <p class="empty small" id="routine-empty">No workouts yet. Tap <strong>+ Add</strong> to pick some.</p>
           <!-- Autoregulation is now one switch in Settings (2026-10-10), not per routine. This
@@ -126,11 +130,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
             <button type="button" class="button subtle" id="open-presets">Presets</button>
             <p class="hint" id="preset-status" aria-live="polite"></p>
           </div>
-          <p class="hint">Weekly sets per muscle group: one pass through the routine, scaled by
-            7&nbsp;÷&nbsp;<span data-cycle-echo>${cycleDays}</span> days. A primary muscle counts
-            ${MUSCLE_SET_WEIGHTS.primary} per set; an ancillary muscle counts ${MUSCLE_SET_WEIGHTS.ancillary}.
-            Enter the weekly minimum for each group (or apply a preset). Bars are scaled to the group with the
-            most sets; the tick marks the minimum, and a bar is red until it reaches it.</p>
+          <p class="hint">${HELP.routineEditor.muscleSets(cycleDays)}</p>
           <ul class="muscle-volume" id="muscle-volume">
             ${muscles.map((mg) => html`
               <li data-muscle=${mg.name}>
@@ -157,7 +157,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
           <h2 id="preset-sheet-title">Target presets</h2>
           <button type="button" class="button subtle" data-close>Cancel</button>
         </div>
-        <p class="hint">Fills every group’s weekly minimum. Groups a preset leaves out get 0.</p>
+        <p class="hint">${HELP.routineEditor.presetPicker}</p>
         ${presets.length ? html`
           <ul class="picker-list">
             ${presets.map((p) => html`
@@ -196,7 +196,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
   };
 }
 
-type WorkoutOption = { id: number; name: string; count: number; muscles: Record<string, { primary: number; ancillary: number }> };
+type WorkoutOption = { id: number; name: string; count: number; sets: number; muscles: Record<string, { primary: number; ancillary: number }> };
 
 // static/routine_form.js: the routine is an ordered array of workout ids (repeats allowed). The
 // Volume Planning tab totals sets per muscle group live from it (primary 1 / ancillary 0.5 per set),
@@ -211,6 +211,7 @@ function mountRoutineEditor(
   const ids = opts.initialIds.filter((id) => byId.has(id));
   const list = root.querySelector<HTMLElement>("#routine-list")!;
   const empty = root.querySelector<HTMLElement>("#routine-empty")!;
+  const total = root.querySelector<HTMLElement>("#routine-total")!;
   const picker = root.querySelector<HTMLDialogElement>("#picker")!;
   const pickerList = root.querySelector<HTMLElement>("#picker-list");
   const volumeList = root.querySelector<HTMLElement>("#muscle-volume")!;
@@ -228,13 +229,15 @@ function mountRoutineEditor(
       return `<li class="wx-card routine-item">
         <span class="routine-num">${i + 1}</span>
         <div class="wx-title"><h3><button type="button" class="routine-open" data-open="${id}" data-drag-ok
-          aria-label="Edit workout ${esc(w.name)}">${esc(w.name)}</button></h3><span class="picker-meta">${plural(w.count, "exercise")}</span></div>
+          aria-label="Edit workout ${esc(w.name)}">${esc(w.name)}</button></h3><span class="picker-meta">${plural(w.count, "exercise")} · ${setsLabel(w.sets)}</span></div>
         <div class="wx-actions">
           <button type="button" class="icon-btn danger" data-act="remove" data-i="${i}" aria-label="Remove ${esc(w.name)}">&times;</button>
         </div>
       </li>`;
     }).join("");
     empty.hidden = ids.length > 0;
+    total.hidden = ids.length === 0;
+    total.textContent = `Routine total: ${setsLabel(ids.reduce((n, id) => n + byId.get(id)!.sets, 0))}`;
     renderVolume();
   }
 
@@ -473,7 +476,7 @@ async function presetForm(ctx: Ctx, preset: Preset | null) {
         </div>
         <fieldset class="field">
           <legend>Weekly minimum sets</legend>
-          <p class="hint">Leave a group blank for 0.</p>
+          <p class="hint">${HELP.presetForm.values}</p>
           <ul class="preset-values">
             ${muscles.map((mg) => html`
               <li>

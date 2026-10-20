@@ -8,6 +8,7 @@ import {
 import { formatNumber, formatVolume, historyDate, truncate1 } from "../../logic/text";
 import { currentPath, flash, href, navigate, refresh, route } from "../app";
 import { mountVolumeChart } from "../volumeChart";
+import { HELP } from "../help";
 
 route(/^\/progress$/, async (ctx) => {
   const { today } = ctx;
@@ -38,7 +39,7 @@ route(/^\/progress$/, async (ctx) => {
           <label>To <input type="date" name="end" .value=${end}></label>
           <button type="submit" class="button subtle small">Apply</button>
         </form>
-        <p class="hint range-note">${label(start)} – ${label(end)} · ${p.nDays} day${p.nDays === 1 ? "" : "s"}. Only completed (✓) sets count.</p>
+        <p class="hint range-note">${label(start)} – ${label(end)} · ${p.nDays} day${p.nDays === 1 ? "" : "s"}. ${HELP.progress.range}</p>
       </section>
       <section class="kpis" aria-label="Totals">
         <div class="kpi"><span class="kpi-value">${formatVolume(p.totalVolume)}</span><span class="kpi-label">lb volume</span></div>
@@ -47,7 +48,7 @@ route(/^\/progress$/, async (ctx) => {
       </section>
       <section class="card chart-card">
         <h2>Volume per day</h2>
-        <p class="hint">Sum of weight × reps across completed sets, in lb.</p>
+        <p class="hint">${HELP.progress.volume}</p>
         <div class="chart" id="volume-chart" tabindex="0" role="img"
              aria-label="Bar chart of volume per day from ${label(start)} to ${label(end)}. Use the left and right arrow keys to read each day, or open the table below.">
           <div class="chart-tooltip" id="chart-tooltip" hidden><strong></strong><span></span></div>
@@ -69,9 +70,7 @@ route(/^\/progress$/, async (ctx) => {
           <h2>Sets per muscle group</h2>
           <button type="button" class="button subtle small" id="open-presets">Presets</button>
         </div>
-        <p class="hint">Completed sets in this range: primary muscle 1 per set, ancillary 0.5. Per week = total × 7 ÷ ${p.nDays} days.
-          Enter a weekly minimum for each group (or load a preset). Bars are scaled to the group with the most sets;
-          the tick marks the minimum, and a bar is red until it reaches it.</p>
+        <p class="hint">${HELP.progress.muscleSets(p.nDays)}</p>
         <ul class="muscle-volume" id="progress-targets">
           ${p.muscles.map((m) => html`
             <li data-id=${m.id} data-name=${m.name} data-week=${m.per_week} data-total-range=${m.total}>
@@ -93,7 +92,7 @@ route(/^\/progress$/, async (ctx) => {
           <h2 id="preset-sheet-title">Target presets</h2>
           <button type="button" class="button subtle" data-close>Cancel</button>
         </div>
-        <p class="hint">Loading a preset replaces every group’s weekly minimum. Groups it leaves out get 0.</p>
+        <p class="hint">${HELP.progress.presetPicker}</p>
         ${presets.length ? html`
           <ul class="picker-list">
             ${presets.map((pr) => html`

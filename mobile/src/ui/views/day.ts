@@ -24,6 +24,7 @@ import { tapHaptic } from "../native";
 import { autoregulation, collapsedEntries, quickFillOn, setEntryCollapsed, weightStepDefault } from "../prefs";
 import { takeCreatedExercises } from "./exercises";
 import { mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
+import { HELP } from "../help";
 
 // How each tracking mode appears as a column.
 const FIELDS: Record<TrackingMode, { field: keyof LogSet; label: string; inputmode: string }> = {
@@ -256,8 +257,8 @@ async function dayView(ctx: Ctx, date: string) {
           ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
         </div>
         ${blocks.length ? html`
-          <p class="hint reorder-hint">Swipe an exercise left for history, notes, autoregulation and editing.${blocks.length > 1
-            ? html`<br>Long-press an exercise, or a workout’s name, to drag it.` : ""}</p>
+          <p class="hint reorder-hint">${HELP.day.swipe}${blocks.length > 1
+            ? html`<br>${HELP.day.drag}` : ""}</p>
           <div class="log-list" id="log-list">
             ${segments.map((seg) => (seg.w ? workoutBlock(seg.w, seg.blocks) : seg.blocks.map(blockHtml)))}
           </div>` : html`
@@ -284,7 +285,7 @@ async function dayView(ctx: Ctx, date: string) {
         </div>
         <div class="tab-panel" role="tabpanel" id="panel-routines" aria-labelledby="tab-routines" hidden>
           ${routines.length ? html`
-            <p class="hint">Tap a routine to preview its next workout. Tap &#8635; to pick a different one.</p>
+            <p class="hint">${HELP.day.routinePicker}</p>
             <ul class="picker-list">
               ${routines.map(({ routine: r, next: i }) => html`
                 <li class="pick-item routine-pick" data-kind="routines" data-id=${r.id} data-index=${i} data-suggested=${i}
@@ -342,12 +343,12 @@ async function dayView(ctx: Ctx, date: string) {
         <form class="form" id="notes-form">
           <div class="field">
             <label for="exercise-note">Every time</label>
-            <p class="hint">Shown whenever you do this exercise.</p>
+            <p class="hint">${HELP.day.exerciseNote}</p>
             <textarea id="exercise-note" rows="3" maxlength=${NOTE_MAX_LENGTH}></textarea>
           </div>
           <div class="field">
             <label for="session-note">This session</label>
-            <p class="hint">Only for ${dayLabel}. Kept in the exercise’s history.</p>
+            <p class="hint">${HELP.day.sessionNote(dayLabel)}</p>
             <textarea id="session-note" rows="3" maxlength=${NOTE_MAX_LENGTH}></textarea>
           </div>
           <button type="submit" class="button block">Save notes</button>
@@ -364,7 +365,7 @@ async function dayView(ctx: Ctx, date: string) {
             <div class="field"><label for="wt-start">Start</label><input type="time" id="wt-start"></div>
             <div class="field"><label for="wt-end">Finish</label><input type="time" id="wt-end"></div>
           </div>
-          <p class="hint">Blank means unknown and is left out of stats. A finish earlier than the start is the next day.</p>
+          <p class="hint">${HELP.day.workoutTimes}</p>
           <button type="submit" class="button block">Save times</button>
         </form>
       </dialog>

@@ -300,3 +300,9 @@ export function workoutMuscleSets(workout: Workout): Record<string, Record<Muscl
   }
   return totals;
 }
+
+/** Planned sets in a workout: every set of every exercise (user requirement, 2026-10-20). */
+export const workoutSetCount = (workout: Workout) => workout.slots.reduce((n, wx) => n + wx.sets.length, 0);
+
+/** "1 set", "12 sets". */
+export const setsLabel = (n: number) => `${n} set${n === 1 ? "" : "s"}`;
