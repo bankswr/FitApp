@@ -3,8 +3,10 @@
 import { html } from "lit-html";
 import { listPresets, type Preset, savePreset } from "../../logic/presets";
 import {
-  progressData, progressRange, progressTargets, rangePresets, replaceProgressTargets, saveProgressTarget,
+  parseProgressFilter, progressData, progressRange, progressTargets, rangePresets, replaceProgressTargets, saveProgressTarget,
 } from "../../logic/progress";
+import { listRoutines } from "../../logic/routines";
+import { listWorkouts } from "../../logic/workouts";
 import { formatNumber, formatVolume, historyDate, truncate1 } from "../../logic/text";
 import { currentPath, flash, href, navigate, refresh, route } from "../app";
 import { mountVolumeChart } from "../volumeChart";
@@ -18,7 +20,13 @@ route(/^\/progress$/, async (ctx) => {
     range = progressRange(null, null, today);
   }
   const { start, end } = range;
-  const p = await progressData(ctx.db, start, end);
+  // Routine / workout selector (user requirement, 2026-10-23): one that no longer exists shows everything.
+  const routines = await listRoutines(ctx.db);
+  const workouts = await listWorkouts(ctx.db);
+  let filter = parseProgressFilter(ctx.query.get("routine"), ctx.query.get("workout"));
+  if (filter && !(filter.kind === "routine" ? routines : workouts).some((x) => x.id === filter!.id)) filter = null;
+  const only = { routine: filter?.kind === "routine" ? String(filter.id) : null, workout: filter?.kind === "workout" ? String(filter.id) : null };
+  const p = await progressData(ctx.db, start, end, filter);
   const targets = await progressTargets(ctx.db);
   const presets = await listPresets(ctx.db);
   const here = `#${currentPath()}`;
@@ -29,9 +37,21 @@ route(/^\/progress$/, async (ctx) => {
     content: html`
       <header class="page-header"><h1>Progress</h1></header>
       <section class="range-filter" aria-label="Date range">
+        <label class="progress-only">
+          <span>Show</span>
+          <select id="progress-only" aria-label="Show progress for">
+            <option value="" ?selected=${!filter}>All training</option>
+            ${routines.length ? html`<optgroup label="Routines">
+              ${routines.map((r) => html`<option value="routine:${r.id}" ?selected=${only.routine === String(r.id)}>${r.name}</option>`)}
+            </optgroup>` : ""}
+            ${workouts.length ? html`<optgroup label="Workouts">
+              ${workouts.map((w) => html`<option value="workout:${w.id}" ?selected=${only.workout === String(w.id)}>${w.name}</option>`)}
+            </optgroup>` : ""}
+          </select>
+        </label>
         <div class="range-presets">
           ${rangePresets(today).map(([name, presetStart]) => html`
-            <a class="chip-link" href=${href("/progress", { start: presetStart, end: today })}
+            <a class="chip-link" href=${href("/progress", { start: presetStart, end: today, ...only })}
                aria-current=${start === presetStart && end === today ? "true" : "false"}>${name}</a>`)}
         </div>
         <form class="range-custom" id="range-form">
@@ -39,7 +59,8 @@ route(/^\/progress$/, async (ctx) => {
           <label>To <input type="date" name="end" .value=${end}></label>
           <button type="submit" class="button subtle small">Apply</button>
         </form>
-        <p class="hint range-note">${label(start)} – ${label(end)} · ${p.nDays} day${p.nDays === 1 ? "" : "s"}. ${HELP.progress.range}</p>
+        <p class="hint range-note">${label(start)} – ${label(end)} · ${p.nDays} day${p.nDays === 1 ? "" : "s"}. ${HELP.progress.range}${
+          filter ? html` ${HELP.progress.only}` : ""}</p>
       </section>
       <section class="kpis" aria-label="Totals">
         <div class="kpi"><span class="kpi-value">${formatVolume(p.totalVolume)}</span><span class="kpi-label">lb volume</span></div>
@@ -121,7 +142,12 @@ route(/^\/progress$/, async (ctx) => {
       form.addEventListener("submit", (e) => {
         e.preventDefault();
         const data = new FormData(form);
-        navigate(href("/progress", { start: String(data.get("start") ?? ""), end: String(data.get("end") ?? "") }));
+        navigate(href("/progress", { start: String(data.get("start") ?? ""), end: String(data.get("end") ?? ""), ...only }));
+      }, { signal });
+      const select = root.querySelector<HTMLSelectElement>("#progress-only")!;
+      select.addEventListener("change", () => {
+        const [kind, id] = select.value.split(":");
+        navigate(href("/progress", { start, end, routine: kind === "routine" ? id : null, workout: kind === "workout" ? id : null }));
       }, { signal });
     },
   };

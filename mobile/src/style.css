@@ -968,7 +968,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   cursor: pointer;
 }
 .ex-filter-row { display: flex; gap: 6px; align-items: center; }
-.ex-filter select {
+.ex-filter select, .progress-only select {
   flex: 1;
   min-width: 0;
   min-height: 40px;
@@ -1086,6 +1086,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Progress */
 .range-filter { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .range-presets { display: flex; gap: 8px; }
+.progress-only { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: var(--muted); }
 .chip-link {
   display: inline-flex;
   align-items: center;

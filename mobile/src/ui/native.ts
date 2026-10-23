@@ -87,6 +87,8 @@ const RestTimer = registerPlugin<{
   start(o: { endsAt: number }): Promise<void>;
   stop(): Promise<void>;
   chime(): Promise<void>;
+  takeStopped(): Promise<{ endsAt: number | null }>;
+  addListener(event: "stopped", fn: () => void): Promise<{ remove(): Promise<void> }>;
 }>("RestTimer");
 
 /**
@@ -121,6 +123,24 @@ export async function clearRestTimer(): Promise<void> {
   } catch {
     /* nothing running */
   }
+}
+
+/**
+ * The notification's Stop button (user requirement, 2026-10-23): calls `onStop(endsAt)` with the end
+ * time of the countdown stopped from the tray, right away while the app runs and otherwise when it
+ * comes back or this is set up. Stops listening when `signal` aborts. Resolves once the first check is done.
+ */
+export function watchRestTimerStop(signal: AbortSignal, onStop: (endsAt: number) => void): Promise<void> {
+  if (!isNative) return Promise.resolve();
+  const check = () => RestTimer.takeStopped().then(({ endsAt }) => {
+    if (endsAt != null && !signal.aborted) onStop(endsAt);
+  }).catch(() => {});
+  void RestTimer.addListener("stopped", check).then((handle) => {
+    if (signal.aborted) void handle.remove();
+    else signal.addEventListener("abort", () => void handle.remove());
+  });
+  document.addEventListener("visibilitychange", () => !document.hidden && void check(), { signal });
+  return check();
 }
 
 /** Ask for notification permission ahead of time (the first rest timer start), so it isn't asked mid-rest. */

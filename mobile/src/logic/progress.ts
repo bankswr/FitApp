@@ -26,19 +26,41 @@ export interface ProgressData {
 }
 
 /**
+ * Narrows Progress to one routine or workout (user requirement, 2026-10-23): sets logged in a
+ * session of that workout, or of any workout now in that routine. A session is a log_workout, so
+ * exercises added to a workout's block on the day count, and ones outside any workout don't.
+ */
+export type ProgressFilter = { kind: "routine" | "workout"; id: number } | null;
+
+function filterSql(filter: ProgressFilter): [string, unknown[]] {
+  if (!filter) return ["", []];
+  const workouts = filter.kind === "workout" ? "?" : "SELECT workout_id FROM routine_workout WHERE routine_id = ?";
+  return [` AND lx.log_workout_id IN (SELECT id FROM log_workout WHERE workout_id IN (${workouts}))`, [filter.id]];
+}
+
+/** The filter from ?routine= / ?workout=, or null (everything). */
+export function parseProgressFilter(routine: string | null, workout: string | null): ProgressFilter {
+  const id = (v: string | null) => (v && /^\d+$/.test(v) ? Number(v) : null);
+  if (id(routine) !== null) return { kind: "routine", id: id(routine)! };
+  if (id(workout) !== null) return { kind: "workout", id: id(workout)! };
+  return null;
+}
+
+/**
  * Only completed working sets count (warmups never do, agent-notes/warmups.md). Volume = sum of weight × reps per day, where a bodyweight set's
  * weight is its total (SET_LOAD_SQL). Muscle sets use the routine
  * weighting (primary 1, ancillary 0.5) with each exercise's current muscles; per week =
  * total × 7 / days in range.
  */
-export async function progressData(db: Db, start: string, end: string): Promise<ProgressData> {
+export async function progressData(db: Db, start: string, end: string, filter: ProgressFilter = null): Promise<ProgressData> {
   const nDays = daysBetween(start, end) + 1;
+  const [only, onlyParams] = filterSql(filter);
   const volumeRows = await db.all(
     `SELECT lx.date, SUM((${SET_LOAD_SQL}) * ls.reps) AS volume FROM log_exercise lx JOIN log_set ls ON ls.log_exercise_id = lx.id
      WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND NOT ls.is_warmup AND ls.reps IS NOT NULL
-       AND (ls.weight IS NOT NULL OR ls.uses_bodyweight)
+       AND (ls.weight IS NOT NULL OR ls.uses_bodyweight)${only}
      GROUP BY lx.date`,
-    [start, end],
+    [start, end, ...onlyParams],
   );
   const volumeByDay = new Map(volumeRows.map((r) => [r.date as string, r.volume as number]));
   const days = Array.from({ length: nDays }, (_, i) => {
@@ -48,8 +70,8 @@ export async function progressData(db: Db, start: string, end: string): Promise<
 
   const setRows = await db.all(
     `SELECT lx.exercise_id, COUNT(ls.id) AS n FROM log_exercise lx JOIN log_set ls ON ls.log_exercise_id = lx.id
-     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND NOT ls.is_warmup GROUP BY lx.exercise_id`,
-    [start, end],
+     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND NOT ls.is_warmup${only} GROUP BY lx.exercise_id`,
+    [start, end, ...onlyParams],
   );
   const setsByExercise = new Map(setRows.map((r) => [r.exercise_id as number, r.n as number]));
   const muscleSets = new Map<number, number>(); // muscle_group_id -> weighted sets

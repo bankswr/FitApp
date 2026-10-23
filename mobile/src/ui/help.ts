@@ -60,6 +60,7 @@ export const HELP = {
 
   progress: {
     range: "Only completed (✓) sets count, not warmups.",
+    only: "Only sets logged in that workout (or the routine's workouts) on the day count.",
     volume: "Sum of weight × reps across completed sets, in lb. Bodyweight exercises count their total weight.",
     muscleSets: (nDays: number) => `Completed sets in this range: primary muscle ${MUSCLE_SET_WEIGHTS.primary} per set,
       ancillary ${MUSCLE_SET_WEIGHTS.ancillary}. Per week = total × 7 ÷ ${nDays} days. Enter a weekly minimum for

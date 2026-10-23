@@ -7,10 +7,12 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.SystemClock;
 import android.widget.RemoteViews;
 import androidx.core.app.NotificationCompat;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -21,6 +23,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
  * notification shows it counting down (status bar and lock screen), and an alarm-clock alarm fires
  * at the end even if the phone is asleep (RestAlarmReceiver). The web code calls start() whenever
  * the end time is set or changed and stop() when the countdown stops or ends in the app.
+ * The notification's Stop button ends it from the tray (RestStopReceiver); the app hears of that
+ * through the "stopped" event, or takeStopped() when it comes back.
  */
 @CapacitorPlugin(name = "RestTimer")
 public class RestTimerPlugin extends Plugin {
@@ -30,6 +34,15 @@ public class RestTimerPlugin extends Plugin {
     private static final String CHANNEL_DONE_OLD = "rest_over";
     static final int RUNNING_ID = 101;
     static final int DONE_ID = 102;
+    private static final String PREFS = "rest_timer";
+    private static final String ENDS_AT = "ends_at"; // the countdown the notification shows
+    private static final String STOPPED = "stopped_ends_at"; // a countdown stopped from the tray, not yet seen by the app
+    private static volatile RestTimerPlugin instance;
+
+    @Override
+    public void load() {
+        instance = this;
+    }
 
     @PluginMethod
     public void start(PluginCall call) {
@@ -42,6 +55,7 @@ public class RestTimerPlugin extends Plugin {
         Context context = getContext();
         long end = (long) endsAt;
         cancelAll(context);
+        prefs(context).edit().putLong(ENDS_AT, end).remove(STOPPED).apply();
         ensureChannels(context);
         try {
             notifications(context).notify(RUNNING_ID, runningNotification(context, end));
@@ -69,7 +83,31 @@ public class RestTimerPlugin extends Plugin {
     @PluginMethod
     public void stop(PluginCall call) {
         cancelAll(getContext());
+        prefs(getContext()).edit().remove(ENDS_AT).apply();
         call.resolve();
+    }
+
+    /** The end time of a countdown stopped from the notification since the last call ({ endsAt: null } if none). */
+    @PluginMethod
+    public void takeStopped(PluginCall call) {
+        SharedPreferences p = prefs(getContext());
+        JSObject result = new JSObject();
+        result.put("endsAt", p.contains(STOPPED) ? p.getLong(STOPPED, 0) : null);
+        p.edit().remove(STOPPED).apply();
+        call.resolve(result);
+    }
+
+    /** The notification's Stop button (RestStopReceiver). */
+    static void stopFromNotification(Context context) {
+        cancelAll(context);
+        SharedPreferences p = prefs(context);
+        if (p.contains(ENDS_AT)) p.edit().putLong(STOPPED, p.getLong(ENDS_AT, 0)).remove(ENDS_AT).apply();
+        RestTimerPlugin plugin = instance;
+        if (plugin != null) plugin.notifyListeners("stopped", new JSObject());
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     private static void cancelAll(Context context) {
@@ -138,7 +176,13 @@ public class RestTimerPlugin extends Plugin {
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(openApp(context))
+            .addAction(R.drawable.ic_stat_timer, "Stop", stopIntent(context))
             .build();
+    }
+
+    private static PendingIntent stopIntent(Context context) {
+        Intent intent = new Intent(context, RestStopReceiver.class);
+        return PendingIntent.getBroadcast(context, 1, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     private static RemoteViews countdownView(Context context, int layout, long base) {

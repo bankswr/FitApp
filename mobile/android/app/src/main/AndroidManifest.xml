@@ -26,6 +26,7 @@
 
         <!-- End of a rest (RestTimerPlugin) -->
         <receiver android:name=".RestAlarmReceiver" android:exported="false" />
+        <receiver android:name=".RestStopReceiver" android:exported="false" />
         <!-- Rest-over chime in the background: a media foreground service may take audio focus -->
         <service
             android:name=".RestChimeService"

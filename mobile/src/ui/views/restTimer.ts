@@ -4,7 +4,7 @@
 // set that qualifies is checked off (see restAfterSets for the superset rule).
 import { html } from "lit-html";
 import { formatDuration } from "../../logic/text";
-import { alarmHaptic, clearRestTimer, nativeChime, prepareRestAlarms, showRestTimer } from "../native";
+import { alarmHaptic, clearRestTimer, nativeChime, prepareRestAlarms, showRestTimer, watchRestTimerStop } from "../native";
 import { HELP } from "../help";
 
 const KEY = "fitapp.restTimer";
@@ -208,10 +208,22 @@ export function mountRestTimer(root: HTMLElement, signal: AbortSignal): { onSetC
     if (!document.hidden && state.endsAt) update();
   }, { signal });
 
+  // Stopped from the notification's Stop button: stop here too, unless a newer countdown has started since.
+  const stopChecked = watchRestTimerStop(signal, (endsAt) => {
+    const current = loadState().endsAt;
+    if (current !== null && Math.abs(current - endsAt) < 1000) {
+      state.endsAt = current;
+      stop();
+    }
+  });
+
   // Resume a countdown already running (e.g. from another day); one that expired long ago resets quietly.
   if (state.endsAt && remaining()! > -10) {
     run();
-    if (state.endsAt) void syncPhone();
+    // After the Stop check, so a countdown stopped from the tray isn't put back on it.
+    void stopChecked.then(() => {
+      if (state.endsAt) void syncPhone();
+    });
   } else {
     state.endsAt = null;
     save();
