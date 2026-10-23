@@ -1,6 +1,7 @@
 // Bar chart of volume per day on the Progress screen (static/progress.js): inline SVG,
-// redrawn to fit the card. Hover/tap a day's column (the whole column is the hit target) or
-// use ←/→ when the chart has focus to read a day; the table view has every value too.
+// redrawn to fit the card. Hover/tap anywhere or use ←/→ when the chart has focus to read a day;
+// rest days are skipped (user, 2026-10-23): the nearest day with volume is shown. The table view
+// has every value too.
 const SVG = "http://www.w3.org/2000/svg";
 const BAR = "#16a34a"; // validated against the card surface (dataviz validate_palette, dark mode)
 const BAR_ACTIVE = "#22c55e"; // the hovered bar lifts a step lighter
@@ -101,8 +102,14 @@ export function mountVolumeChart(chart: HTMLElement, days: { date: string; volum
     tooltip.hidden = true;
   }
 
-  const indexAt = (clientX: number) =>
-    Math.min(days.length - 1, Math.max(0, Math.floor((clientX - chart.getBoundingClientRect().left - LEFT) / band)));
+  // Days that have volume; with none at all, every day can be read (as "Rest day").
+  const withVolume = days.flatMap((d, i) => (d.volume ? [i] : []));
+  const readable = withVolume.length ? withVolume : days.map((_, i) => i);
+  /** The readable day whose column centre is nearest the pointer. */
+  const indexAt = (clientX: number) => {
+    const x = (clientX - chart.getBoundingClientRect().left - LEFT) / band - 0.5;
+    return readable.reduce((best, i) => (Math.abs(i - x) < Math.abs(best - x) ? i : best));
+  };
 
   chart.addEventListener("pointermove", (e) => show(indexAt(e.clientX)), { signal });
   chart.addEventListener("pointerdown", (e) => show(indexAt(e.clientX)), { signal });
@@ -112,8 +119,10 @@ export function mountVolumeChart(chart: HTMLElement, days: { date: string; volum
   chart.addEventListener("keydown", (e) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const start = active < 0 ? days.length - 1 : active + (e.key === "ArrowRight" ? 1 : -1);
-    show(Math.min(days.length - 1, Math.max(0, start)));
+    // The next / previous day with volume; the latest one first.
+    const k = readable.indexOf(active);
+    const next = active < 0 ? readable.length - 1 : k + (e.key === "ArrowRight" ? 1 : -1);
+    show(readable[Math.min(readable.length - 1, Math.max(0, next))]);
   }, { signal });
   chart.addEventListener("blur", hide, { signal });
 

@@ -210,12 +210,19 @@ async function dayView(ctx: Ctx, date: string) {
         ${lx.sets.map((s, i) => setRow(lx, s, i))}
       </div>
       <div class="log-actions">
-        <button type="button" class="button subtle small" data-act="add-set" data-lx=${lx.id}>+ Set</button>
-        <button type="button" class="button subtle small" data-act="remove-set" data-lx=${lx.id}
-                ?disabled=${lx.sets.filter((s) => !s.is_warmup).length <= 1}>&minus; Set</button>
-        <button type="button" class="button subtle small" data-act="add-warmup" data-lx=${lx.id}>+ Warmup</button>
-        <button type="button" class="button subtle small" data-act="remove-warmup" data-lx=${lx.id}
-                ?disabled=${!lx.sets.some((s) => s.is_warmup)}>&minus; Warmup</button>
+        <!-- Warmups on the left, sets on the right (user, 2026-10-23), as − label + steppers. -->
+        <div class="count-stepper" role="group" aria-label="Warmup sets">
+          <button type="button" class="button subtle small" data-act="remove-warmup" data-lx=${lx.id} aria-label="Remove a warmup"
+                  ?disabled=${!lx.sets.some((s) => s.is_warmup)}>&minus;</button>
+          <span aria-hidden="true">Warmup</span>
+          <button type="button" class="button subtle small" data-act="add-warmup" data-lx=${lx.id} aria-label="Add a warmup">+</button>
+        </div>
+        <div class="count-stepper" role="group" aria-label="Sets">
+          <button type="button" class="button subtle small" data-act="remove-set" data-lx=${lx.id} aria-label="Remove a set"
+                  ?disabled=${lx.sets.filter((s) => !s.is_warmup).length <= 1}>&minus;</button>
+          <span aria-hidden="true">Set</span>
+          <button type="button" class="button subtle small" data-act="add-set" data-lx=${lx.id} aria-label="Add a set">+</button>
+        </div>
         ${supersetButton(lx)}
       </div>
       </div>
