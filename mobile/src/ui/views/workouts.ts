@@ -170,13 +170,21 @@ async function builder(ctx: Ctx, workout: Workout | null) {
 // Autofill: the first value typed into a column (min, max, weight, time, distance) is mirrored into
 // that column on the exercise's other sets as you type (rep columns skip AMRAP sets). Once that field
 // is committed (blur), the column is "filled" and later edits stay put.
+//
+// Warmups (agent-notes/warmups.md) are sets with `warmup: true`, kept first in `sets`. They have their
+// own rows above the working sets, with a weight target (for incremental loading) and no AMRAP.
+// Autofill keeps the two kinds apart.
 
 const DEFAULT_SET_COUNT = 3;
 const FIELDS = ["min", "max", "weight", "time", "distance"] as const;
 const TEXT_FIELDS = ["weight", "time", "distance"];
 type Field = (typeof FIELDS)[number];
-type EditSet = { min: number | null; max: number | null; amrap: boolean; weight: string | null; time: string | null; distance: string | null };
-type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<Field, boolean>; lx?: number };
+type EditSet = {
+  min: number | null; max: number | null; amrap: boolean; weight: string | null; time: string | null; distance: string | null; warmup?: boolean;
+};
+/** `filled` is keyed by column, plus ":w" for the warmup rows' columns. */
+type EditItem = { exercise_id: number; superset_next: boolean; sets: EditSet[]; filled: Record<string, boolean>; lx?: number };
+const fillKey = (field: Field, set: EditSet) => (set.warmup ? `${field}:w` : field);
 
 function mountBuilder(
   root: HTMLElement, signal: AbortSignal, options: PickerOption[], initial: Item[], draftKey: string,
@@ -188,12 +196,13 @@ function mountBuilder(
   const asText = (field: string, v: unknown) =>
     v == null || v === "" ? null : field === "time" && typeof v === "number" ? formatTime(v) : String(v);
   const items: EditItem[] = initial.filter((it) => byId.has(it.exercise_id)).map((it) => {
-    const sets = it.sets.map((st) => ({
+    const sets: EditSet[] = it.sets.map((st) => ({
       min: st.min, max: st.max, amrap: st.amrap, weight: asText("weight", st.weight), time: asText("time", st.time),
-      distance: asText("distance", st.distance),
+      distance: asText("distance", st.distance), ...(st.warmup ? { warmup: true } : {}),
     }));
     // Loaded workouts (edit / failed save): a column that already has values counts as filled.
-    const filled = Object.fromEntries(FIELDS.map((f) => [f, sets.some((st) => st[f] != null)])) as Record<Field, boolean>;
+    const filled: Record<string, boolean> = {};
+    for (const st of sets) for (const f of FIELDS) if (st[f] != null) filled[fillKey(f, st)] = true;
     return { exercise_id: it.exercise_id, superset_next: it.superset_next, sets, filled, lx: it.lx };
   });
 
@@ -216,27 +225,68 @@ function mountBuilder(
     distance: { tracks: "minmax(0, 1fr)", heads: ["mi"] },
   };
   const gridColumns = (item: EditItem) => ["28px", ...modesOf(item).map((m) => COLUMNS[m].tracks), "40px"].join(" ");
+  // Warmup rows: a weight target (user: for incremental loading) and reps without AMRAP.
+  const WARMUP_COLUMNS: Record<string, { tracks: string; head: string }> = {
+    weight: { tracks: "minmax(0, 1fr)", head: "lb" },
+    reps: { tracks: "minmax(0, 2fr)", head: "Reps" },
+    time: { tracks: "minmax(0, 1fr)", head: "Time" },
+    distance: { tracks: "minmax(0, 1fr)", head: "mi" },
+  };
+  const warmupModes = (item: EditItem) => byId.get(item.exercise_id)!.modes;
+  const warmupColumns = (item: EditItem) => ["28px", ...warmupModes(item).map((m) => WARMUP_COLUMNS[m].tracks), "40px"].join(" ");
+  const isWarmup = (set: EditSet) => Boolean(set.warmup);
   const timeInvalid = (set: EditSet) => set.time != null && Number.isNaN(parseTime(set.time));
   const rangeInvalid = (set: EditSet) => set.min != null && set.max != null && Number(set.min) > Number(set.max);
 
   function textInput(field: Field, i: number, s: number, set: EditSet, o: { inputmode: string; label: string; placeholder?: string; invalid?: boolean }) {
     return `<input type="text" inputmode="${o.inputmode}" maxlength="7" data-field="${field}" data-i="${i}" data-s="${s}"
       class="${o.invalid ? "invalid" : ""}" value="${set[field] == null ? "" : esc(set[field])}"
-      placeholder="${o.placeholder ?? "–"}" aria-label="Set ${s + 1} ${o.label}" autocomplete="off">`;
+      placeholder="${o.placeholder ?? "–"}" aria-label="${o.label}" autocomplete="off">`;
+  }
+
+  /** "Set 2" / "Warmup 1", counted within its kind. */
+  const setName = (item: EditItem, s: number) => {
+    const set = item.sets[s];
+    const n = item.sets.slice(0, s + 1).filter((x) => isWarmup(x) === isWarmup(set)).length;
+    return { label: `${isWarmup(set) ? "Warmup" : "Set"} ${n}`, num: isWarmup(set) ? `W${n}` : String(n) };
+  };
+
+  function warmupRow(item: EditItem, i: number, set: EditSet, s: number) {
+    const { label, num } = setName(item, s);
+    const cells = warmupModes(item).map((m) => {
+      if (m === "weight") return textInput("weight", i, s, set, { inputmode: "decimal", label: `${label} weight in lb` });
+      if (m === "time") return textInput("time", i, s, set, { inputmode: "numeric", label: `${label} time`, placeholder: "m:ss", invalid: timeInvalid(set) });
+      if (m === "distance") return textInput("distance", i, s, set, { inputmode: "decimal", label: `${label} distance in miles` });
+      const bad = rangeInvalid(set) ? " invalid" : "";
+      return `<span class="rep-range">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="min" data-i="${i}" data-s="${s}" class="${bad}"
+            value="${set.min ?? ""}" placeholder="min" aria-label="${label} minimum reps">
+          <span class="range-dash">–</span>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="max" data-i="${i}" data-s="${s}" class="${bad}"
+            value="${set.max ?? ""}" placeholder="max" aria-label="${label} maximum reps">
+        </span>`;
+    });
+    return `<li class="set-row warmup" style="grid-template-columns: ${warmupColumns(item)}">
+      <span class="set-num">${num}</span>
+      ${cells.join("")}
+      <button type="button" class="icon-btn" data-act="remove-set" data-i="${i}" data-s="${s}" aria-label="Remove ${label}">&times;</button>
+    </li>`;
   }
 
   function setRow(item: EditItem, i: number, set: EditSet, s: number) {
+    if (isWarmup(set)) return warmupRow(item, i, set, s);
+    const { label, num } = setName(item, s);
     const cells = modesOf(item).map((m) => {
-      if (m === "time") return textInput("time", i, s, set, { inputmode: "numeric", label: "time", placeholder: "m:ss", invalid: timeInvalid(set) });
-      if (m === "distance") return textInput("distance", i, s, set, { inputmode: "decimal", label: "distance in miles" });
+      if (m === "time") return textInput("time", i, s, set, { inputmode: "numeric", label: `${label} time`, placeholder: "m:ss", invalid: timeInvalid(set) });
+      if (m === "distance") return textInput("distance", i, s, set, { inputmode: "decimal", label: `${label} distance in miles` });
       const bad = rangeInvalid(set) ? " invalid" : "";
       const dis = set.amrap ? "disabled" : "";
       return `<span class="rep-range">
           <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="min" data-i="${i}" data-s="${s}" class="${bad}"
-            value="${set.min ?? ""}" placeholder="${set.amrap ? "—" : "min"}" aria-label="Set ${s + 1} minimum reps" ${dis}>
+            value="${set.min ?? ""}" placeholder="${set.amrap ? "—" : "min"}" aria-label="${label} minimum reps" ${dis}>
           <span class="range-dash">–</span>
           <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="max" data-i="${i}" data-s="${s}" class="${bad}"
-            value="${set.max ?? ""}" placeholder="${set.amrap ? "—" : "max"}" aria-label="Set ${s + 1} maximum reps" ${dis}>
+            value="${set.max ?? ""}" placeholder="${set.amrap ? "—" : "max"}" aria-label="${label} maximum reps" ${dis}>
         </span>
         <label class="mini-toggle">
           <input type="checkbox" data-field="amrap" data-i="${i}" data-s="${s}" ${set.amrap ? "checked" : ""}>
@@ -244,10 +294,10 @@ function mountBuilder(
         </label>`;
     });
     return `<li class="set-row" style="grid-template-columns: ${gridColumns(item)}">
-      <span class="set-num">${s + 1}</span>
+      <span class="set-num">${num}</span>
       ${cells.join("")}
       <button type="button" class="icon-btn" data-act="remove-set" data-i="${i}" data-s="${s}"
-        aria-label="Remove set ${s + 1}" ${item.sets.length === 1 ? "disabled" : ""}>&times;</button>
+        aria-label="Remove ${label.toLowerCase()}" ${item.sets.filter((x) => !isWarmup(x)).length === 1 ? "disabled" : ""}>&times;</button>
     </li>`;
   }
 
@@ -259,6 +309,8 @@ function mountBuilder(
     if (item.superset_next) classes.push("linked-below");
     const badges = ex.modes.map((m) => `<span class="badge">${cap(m)}</span>`).join("");
     const heads = ["Set", ...modesOf(item).flatMap((m) => COLUMNS[m].heads), ""];
+    const warmups = item.sets.flatMap((set, s) => (isWarmup(set) ? [setRow(item, i, set, s)] : []));
+    const working = item.sets.flatMap((set, s) => (isWarmup(set) ? [] : [setRow(item, i, set, s)]));
     return `<li class="${classes.join(" ")}">
       <div class="wx-head">
         <div class="wx-title"><h3>${esc(ex.name)}</h3><div class="badges">${badges}</div></div>
@@ -267,11 +319,20 @@ function mountBuilder(
         </div>
       </div>
       <p class="set-hint">${esc(HELP.workoutBuilder.targets)}</p>
+      ${warmups.length ? `
+        <p class="set-hint">${esc(HELP.workoutBuilder.warmups)}</p>
+        <div class="set-head" style="grid-template-columns: ${warmupColumns(item)}" aria-hidden="true">
+          ${["Warmup", ...warmupModes(item).map((m) => WARMUP_COLUMNS[m].head), ""].map((h) => `<span>${h}</span>`).join("")}
+        </div>
+        <ol class="sets warmup-sets">${warmups.join("")}</ol>` : ""}
       <div class="set-head" style="grid-template-columns: ${gridColumns(item)}" aria-hidden="true">
         ${heads.map((h) => `<span>${h}</span>`).join("")}
       </div>
-      <ol class="sets">${item.sets.map((set, s) => setRow(item, i, set, s)).join("")}</ol>
-      <button type="button" class="button subtle small" data-act="add-set" data-i="${i}">+ Add set</button>
+      <ol class="sets">${working.join("")}</ol>
+      <div class="wx-set-actions">
+        <button type="button" class="button subtle small" data-act="add-set" data-i="${i}">+ Add set</button>
+        <button type="button" class="button subtle small" data-act="add-warmup" data-i="${i}">+ Warmup</button>
+      </div>
     </li>`;
   }
 
@@ -307,7 +368,8 @@ function mountBuilder(
     }).join("");
     empty.hidden = items.length > 0;
     hint.hidden = ranges.length < 2;
-    setCount.textContent = items.length ? setsLabel(items.reduce((n, item) => n + item.sets.length, 0)) : "";
+    // Warmups aren't counted in set totals (user).
+    setCount.textContent = items.length ? setsLabel(items.reduce((n, item) => n + item.sets.filter((x) => !isWarmup(x)).length, 0)) : "";
   }
 
   // A link after the last exercise is meaningless and would silently re-link whatever gets added next.
@@ -320,7 +382,7 @@ function mountBuilder(
     items.push({
       exercise_id: id, superset_next: false,
       sets: Array.from({ length: DEFAULT_SET_COUNT }, () => newSet()),
-      filled: Object.fromEntries(FIELDS.map((f) => [f, false])) as Record<Field, boolean>,
+      filled: {},
     });
     render();
   }
@@ -359,10 +421,19 @@ function mountBuilder(
         return render();
       case "add-set": {
         const sets = items[i].sets;
-        sets.push(newSet(sets[sets.length - 1]));
+        sets.push(newSet(sets.filter((x) => !isWarmup(x)).at(-1)));
         render();
         const inputs = list.querySelectorAll<HTMLInputElement>(`[data-field="min"][data-i="${i}"]`);
         if (inputs.length && !inputs[inputs.length - 1].disabled) inputs[inputs.length - 1].focus();
+        return;
+      }
+      case "add-warmup": {
+        // After the last warmup, copying its targets; the first one starts blank.
+        const sets = items[i].sets;
+        const n = sets.filter(isWarmup).length;
+        sets.splice(n, 0, { ...newSet(sets[n - 1]), warmup: true });
+        render();
+        list.querySelector<HTMLInputElement>(`[data-i="${i}"][data-s="${n}"]`)?.focus();
         return;
       }
       case "remove-set":
@@ -391,10 +462,11 @@ function mountBuilder(
     const value = el.value === "" ? null : TEXT_FIELDS.includes(field) ? el.value : Number(el.value);
     (item.sets[s] as any)[field] = value;
     markValidity(i, s);
-    if (quickFill && !item.filled[field]) {
+    const source = item.sets[s];
+    if (quickFill && !item.filled[fillKey(field, source)]) {
       const repField = field === "min" || field === "max";
       item.sets.forEach((set, t) => {
-        if (t === s || (repField && set.amrap)) return;
+        if (t === s || (repField && set.amrap) || isWarmup(set) !== isWarmup(source)) return;
         (set as any)[field] = value;
         const input = list.querySelector<HTMLInputElement>(`[data-field="${field}"][data-i="${i}"][data-s="${t}"]`);
         if (input) input.value = value == null ? "" : String(value);
@@ -412,7 +484,8 @@ function mountBuilder(
     const i = Number(el.dataset.i);
     const item = items[i];
     if (!item) return;
-    if (item.sets[Number(el.dataset.s)]?.[field] != null) item.filled[field] = true;
+    const set = item.sets[Number(el.dataset.s)];
+    if (set?.[field] != null) item.filled[fillKey(field, set)] = true;
     if (field === "time") {
       item.sets.forEach((set, t) => {
         const sec = set.time == null ? null : parseTime(set.time);

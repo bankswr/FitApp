@@ -10,7 +10,7 @@ import { ConflictError, NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
 import { getRoutine, routineNextIndex } from "./routines";
 import { cleanNote, parseIsoDate, parseLogValue, pyTruthy, repTargetLabel, ValidationError } from "./text";
-import { getWorkout, groupBlocks, type Item, type Workout } from "./workouts";
+import { changePlanWarmups, getWorkout, groupBlocks, type Item, warmupSets, type Workout, workingSets } from "./workouts";
 
 export interface LogSet {
   id: number;
@@ -30,6 +30,8 @@ export interface LogSet {
   completed_at: string | null;
   /** Counts the day's bodyweight: weight is added (+) or assistance (−). Fixed once the set is recorded. */
   uses_bodyweight: boolean;
+  /** A warmup: before the working sets, no volume, no autoregulation, no rest timer (agent-notes/warmups.md). */
+  is_warmup: boolean;
   /** Rep target in brief ("11", "8–12", "AMRAP", ""), for the reps field's placeholder. */
   target_label: string;
 }
@@ -55,7 +57,7 @@ export function toLogSet(r: Row): LogSet {
     target_reps_min: r.target_reps_min, target_reps_max: r.target_reps_max, target_amrap: Boolean(r.target_amrap),
     target_reps: r.target_reps ?? null, target_weight: r.target_weight, target_duration_seconds: r.target_duration_seconds, target_distance: r.target_distance,
     weight: r.weight, reps: r.reps, duration_seconds: r.duration_seconds, distance: r.distance, completed_at: r.completed_at,
-    uses_bodyweight: Boolean(r.uses_bodyweight),
+    uses_bodyweight: Boolean(r.uses_bodyweight), is_warmup: Boolean(r.is_warmup),
     target_label: r.target_reps != null ? String(r.target_reps) : repTargetLabel(r.target_reps_min, r.target_reps_max, Boolean(r.target_amrap)),
   };
 }
@@ -119,15 +121,16 @@ async function getEntry(db: Db, id: number): Promise<LogEntry> {
 }
 
 /**
- * Set ids whose completion should auto-start the rest timer. Outside a superset: every set.
- * In a superset, round n ends with the last member that has an nth set, so only that set counts.
+ * Set ids whose completion should auto-start the rest timer. Outside a superset: every working set.
+ * In a superset, round n ends with the last member that has an nth working set, so only that set
+ * counts. Warmups never start it (user, 2026-10-23).
  */
 export function restAfterSets(blocks: LogEntry[][]): Set<number> {
   const ids = new Set<number>();
   for (const block of blocks) {
     for (const lx of block) {
-      lx.sets.forEach((s, n) => {
-        const members = block.filter((m) => m.sets.length > n);
+      workingSets(lx.sets).forEach((s, n) => {
+        const members = block.filter((m) => workingSets(m.sets).length > n);
         if (members.at(-1) === lx) ids.add(s.id);
       });
     }
@@ -139,14 +142,16 @@ export const dayBlocks = (entries: LogEntry[]) => groupBlocks(entries);
 
 /**
  * "Build workout from day" (user requirement): the day's exercises in order, with its supersets
- * and set counts, and every target blank (no rep range, AMRAP, weight, time or distance).
+ * and set counts (warmups stay warmups), and every target blank (no rep range, AMRAP, weight, time or distance).
  */
 export function dayToWorkoutItems(entries: LogEntry[]): Item[] {
   return entries.map((lx, i) => ({
     lx: lx.id,
     exercise_id: lx.exercise.id,
     superset_next: lx.superset_group !== null && entries[i + 1]?.superset_group === lx.superset_group,
-    sets: lx.sets.map(() => ({ min: null, max: null, amrap: false, weight: null, time: null, distance: null })),
+    sets: lx.sets.map((s) => ({
+      min: null, max: null, amrap: false, weight: null, time: null, distance: null, ...(s.is_warmup ? { warmup: true } : {}),
+    })),
   }));
 }
 
@@ -180,9 +185,10 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
         const a = adjusted?.[i]?.[n];
         await db.run(
           `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_reps,
-             target_weight, target_duration_seconds, target_distance, uses_bodyweight) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             target_weight, target_duration_seconds, target_distance, uses_bodyweight, is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [entryId, n + 1, ws.reps_min, ws.reps_max, ws.is_amrap ? 1 : 0, a ? a.reps : null, a ? a.weight : ws.weight,
-            ws.duration_seconds, ws.distance, wx.exercise.uses_bodyweight ? 1 : 0],
+            // Warmups are plain weight, never bodyweight totals (user).
+            ws.duration_seconds, ws.distance, wx.exercise.uses_bodyweight && !ws.is_warmup ? 1 : 0, ws.is_warmup ? 1 : 0],
         );
       }
       position++;
@@ -375,8 +381,9 @@ async function targetsFromLastSession(db: Db, entryId: number, defaultStep: numb
     [entry.exercise.id, entry.date],
   );
   if (!ref) return null;
-  const prevSets = await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? ORDER BY position", [ref.id]);
-  for (const [n, s] of entry.sets.entries()) {
+  // Working sets only, matched by position among them; warmups are left alone.
+  const prevSets = await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? AND NOT is_warmup ORDER BY position", [ref.id]);
+  for (const [n, s] of workingSets(entry.sets).entries()) {
     if (!prevSets[n]) break;
     if (s.completed_at !== null) continue;
     const plan = { reps_min: s.target_reps_min, reps_max: s.target_reps_max, is_amrap: s.target_amrap, weight: s.target_weight };
@@ -393,27 +400,85 @@ async function targetsFromLastSession(db: Db, entryId: number, defaultStep: numb
   return ref.date;
 }
 
-/** Adds a set after the last one, copying its targets. */
+/** Adds a working set after the last one, copying the last working set's targets. */
 export async function addLogSet(db: Db, entryId: number) {
   const entry = await getEntry(db, entryId);
-  const last = entry.sets.at(-1);
+  const last = workingSets(entry.sets).at(-1);
   const { lastId } = await db.run(
     `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_reps,
        target_weight, target_duration_seconds, target_distance, uses_bodyweight) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [entryId, last ? last.position + 1 : 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null,
+    [entryId, (entry.sets.at(-1)?.position ?? 0) + 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null,
       last?.target_amrap ? 1 : 0, last?.target_reps ?? null, last?.target_weight ?? null, last?.target_duration_seconds ?? null, last?.target_distance ?? null,
       entry.exercise.uses_bodyweight ? 1 : 0],
   );
   return setState(await getSet(db, lastId));
 }
 
-/** Removes the last set, unless it's the only one or it's completed. */
+/** Removes the last working set, unless it's the only one or it's completed. */
 export async function removeLastLogSet(db: Db, entryId: number): Promise<void> {
   const entry = await getEntry(db, entryId);
-  if (entry.sets.length <= 1) throw new ConflictError("An exercise needs at least one set. Remove the exercise instead.");
-  const last = entry.sets.at(-1)!;
+  const working = workingSets(entry.sets);
+  if (working.length <= 1) throw new ConflictError("An exercise needs at least one set. Remove the exercise instead.");
+  const last = working.at(-1)!;
   if (last.completed_at !== null) throw new ConflictError("The last set is completed. Un-check it before removing it.");
   await db.run("DELETE FROM log_set WHERE id = ?", [last.id]);
+}
+
+// ---------- warmups (user requirement, 2026-10-23; agent-notes/warmups.md) ----------
+
+/**
+ * The workout plan slot a day entry was loaded from, or null (added on its own, or the workout
+ * was deleted or no longer has the exercise). Duplicates match by order: the entry's nth copy of
+ * the exercise in its loaded workout is the plan's nth slot for that exercise.
+ */
+async function planSlotOf(db: Db, entryId: number): Promise<number | null> {
+  const lx = await get(db, "SELECT * FROM log_exercise WHERE id = ?", [entryId]);
+  if (!lx || lx.workout_id === null) return null;
+  const nth = (await get(db,
+    `SELECT COUNT(*) AS n FROM log_exercise WHERE exercise_id = ? AND workout_id = ? AND position < ?
+       AND ${lx.log_workout_id === null ? "log_workout_id IS NULL AND date = ?" : "log_workout_id = ?"}`,
+    [lx.exercise_id, lx.workout_id, lx.position, lx.log_workout_id ?? lx.date]))!.n as number;
+  const slots = await db.all("SELECT id FROM workout_exercise WHERE workout_id = ? AND exercise_id = ? ORDER BY position",
+    [lx.workout_id, lx.exercise_id]);
+  return slots[nth]?.id ?? null;
+}
+
+/** Renumbers an entry's sets 1..n in the given order of ids. */
+async function renumberSets(db: Db, ids: number[]) {
+  for (const id of ids) await db.run("UPDATE log_set SET position = ? WHERE id = ?", [-id, id]);
+  for (const [n, id] of ids.entries()) await db.run("UPDATE log_set SET position = ? WHERE id = ?", [n + 1, id]);
+}
+
+/**
+ * Adds a warmup after the entry's last warmup (copying its targets) or removes its last one
+ * (not when it's checked off). The workout it was loaded from gets the same change, so later
+ * loads have it (user): returns that workout's name, or null when it's on this day only.
+ */
+export async function changeWarmups(db: Db, entryId: number, add: boolean): Promise<string | null> {
+  const entry = await getEntry(db, entryId);
+  const warmups = warmupSets(entry.sets);
+  const last = warmups.at(-1);
+  if (!add && !last) throw new ConflictError("This exercise has no warmup sets.");
+  if (!add && last!.completed_at !== null) throw new ConflictError("The last warmup is completed. Un-check it before removing it.");
+  const slotId = await planSlotOf(db, entryId);
+  return db.transaction(async () => {
+    const order = entry.sets.map((x) => x.id);
+    if (add) {
+      const { lastId } = await db.run(
+        `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_weight, target_duration_seconds,
+           target_distance, is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [entryId, (entry.sets.at(-1)?.position ?? 0) + 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null,
+          last?.target_weight ?? null, last?.target_duration_seconds ?? null, last?.target_distance ?? null],
+      );
+      order.splice(warmups.length, 0, lastId);
+    } else {
+      await db.run("DELETE FROM log_set WHERE id = ?", [last!.id]);
+      order.splice(order.indexOf(last!.id), 1);
+    }
+    await renumberSets(db, order);
+    if (slotId === null || !(await changePlanWarmups(db, slotId, add))) return null;
+    return entry.workout_name;
+  });
 }
 
 /**

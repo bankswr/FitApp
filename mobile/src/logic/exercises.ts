@@ -148,7 +148,7 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
       await db.run(
         `UPDATE log_set SET uses_bodyweight = ?,
            target_weight = CASE WHEN ? = 0 AND target_weight < 0 THEN NULL ELSE target_weight END
-         WHERE ${UNRECORDED_SET_SQL} AND log_exercise_id IN (SELECT id FROM log_exercise WHERE exercise_id = ?)`,
+         WHERE ${UNRECORDED_SET_SQL} AND NOT is_warmup AND log_exercise_id IN (SELECT id FROM log_exercise WHERE exercise_id = ?)`,
         [bodyweight, bodyweight, exerciseId],
       );
       // Targets for a mode the exercise no longer tracks are meaningless; clear them from workouts.

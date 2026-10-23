@@ -1,9 +1,16 @@
 // An exercise's past sessions (templates/_exercise_history.html). Used by the exercise page
 // and the day view's History sheet.
 import { html } from "lit-html";
+import type { LogSet } from "../../logic/day";
 import type { Exercise } from "../../logic/exercises";
 import { HISTORY_LIMIT, type Session, setResult } from "../../logic/history";
 import { historyDate } from "../../logic/text";
+
+/** "W1", "W2" for warmups, "1", "2" for the rest, counted through the session. */
+const setNumber = (sets: LogSet[], i: number) => {
+  const n = sets.slice(0, i + 1).filter((x) => x.is_warmup === sets[i].is_warmup).length;
+  return sets[i].is_warmup ? `W${n}` : String(n);
+};
 
 export function historyList(exercise: Exercise, sessions: Session[], today: string) {
   if (!sessions.length) {
@@ -22,7 +29,7 @@ export function historyList(exercise: Exercise, sessions: Session[], today: stri
             <ol class="history-sets">
               ${s.sets.map((set, i) => html`
                 <li class=${set.completed_at ? "" : "not-done"}>
-                  <span class="set-num">${i + 1}</span>
+                  <span class="set-num">${setNumber(s.sets, i)}</span>
                   <span>${setResult(set, exercise, s.bodyweight)}</span>
                   ${set.completed_at ? "" : html`<span class="picker-meta">not checked off</span>`}
                 </li>`)}

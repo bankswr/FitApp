@@ -42,6 +42,7 @@ export const HELP = {
   workoutBuilder: {
     drag: "Long-press an exercise to drag it into a new order.",
     targets: "Targets are optional.",
+    warmups: "Warmups come first. They don't count toward volume or set totals and aren't autoregulated.",
   },
 
   exerciseForm: {
@@ -58,7 +59,7 @@ export const HELP = {
   },
 
   progress: {
-    range: "Only completed (✓) sets count.",
+    range: "Only completed (✓) sets count, not warmups.",
     volume: "Sum of weight × reps across completed sets, in lb. Bodyweight exercises count their total weight.",
     muscleSets: (nDays: number) => `Completed sets in this range: primary muscle ${MUSCLE_SET_WEIGHTS.primary} per set,
       ancillary ${MUSCLE_SET_WEIGHTS.ancillary}. Per week = total × 7 ÷ ${nDays} days. Enter a weekly minimum for

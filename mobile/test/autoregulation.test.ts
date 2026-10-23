@@ -11,7 +11,7 @@ import { saveWorkout, type WorkoutSet } from "../src/logic/workouts";
 import { openTestDb } from "./sqljs";
 
 const plan = (min: number | null, max: number | null, weight: number | null = 135): WorkoutSet =>
-  ({ id: 0, position: 1, reps_min: min, reps_max: max, is_amrap: false, weight, duration_seconds: null, distance: null });
+  ({ id: 0, position: 1, reps_min: min, reps_max: max, is_amrap: false, weight, duration_seconds: null, distance: null, is_warmup: false });
 const done = (reps: number, weight: number | null, target_reps: number | null, target_weight: number | null = weight): PreviousSet =>
   ({ reps, weight, completed_at: "2026-10-01 10:00:00", target_reps, target_weight });
 

@@ -17,7 +17,7 @@ export interface DayWorkout {
   name: string;
   started_at: string | null;
   ended_at: string | null;
-  /** Weight × reps over completed sets with both (bodyweight sets at their total), as on the Progress screen. */
+  /** Weight × reps over completed working sets with both (bodyweight sets at their total), as on the Progress screen. */
   volume: number;
   last_check: string | null;
 }
@@ -26,7 +26,7 @@ export const inProgress = (w: Pick<DayWorkout, "started_at" | "ended_at">) => w.
 
 async function dayWorkoutsWhere(db: Db, where: string, params: unknown[]): Promise<DayWorkout[]> {
   return (await db.all(
-    `SELECT lw.*, COALESCE(SUM(CASE WHEN ls.completed_at IS NOT NULL THEN (${SET_LOAD_SQL}) * ls.reps END), 0) AS volume,
+    `SELECT lw.*, COALESCE(SUM(CASE WHEN ls.completed_at IS NOT NULL AND NOT ls.is_warmup THEN (${SET_LOAD_SQL}) * ls.reps END), 0) AS volume,
        MAX(ls.completed_at) AS last_check
      FROM log_workout lw LEFT JOIN log_exercise lx ON lx.log_workout_id = lw.id LEFT JOIN log_set ls ON ls.log_exercise_id = lx.id
      WHERE ${where} GROUP BY lw.id ORDER BY lw.id`, params,

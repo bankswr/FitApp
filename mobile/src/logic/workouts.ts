@@ -16,7 +16,14 @@ export interface WorkoutSet {
   weight: number | null;
   duration_seconds: number | null;
   distance: number | null;
+  /** A warmup set: before the working sets, no volume, no autoregulation (agent-notes/warmups.md). */
+  is_warmup: boolean;
 }
+
+/** The sets that count: everything but warmups. */
+export const workingSets = <T extends { is_warmup: boolean }>(sets: T[]) => sets.filter((s) => !s.is_warmup);
+export const warmupSets = <T extends { is_warmup: boolean }>(sets: T[]) => sets.filter((s) => s.is_warmup);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 export interface WorkoutSlot {
   id: number;
@@ -46,19 +53,27 @@ export function groupBlocks<T extends { superset_group: number | null }>(slots: 
 export const setLabel = (s: WorkoutSet, bodyweight = false) =>
   setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, s.weight, s.duration_seconds, s.distance, bodyweight);
 
-/** e.g. "3 × 8–12 @ 135 lb", "4 sets: 6–8, 6–8, 6–8, AMRAP @ 135 lb", "1 × 25:00 · 3 mi", or "2 sets". */
+/**
+ * e.g. "3 × 8–12 @ 135 lb", "4 sets: 6–8, 6–8, 6–8, AMRAP @ 135 lb", "1 × 25:00 · 3 mi", or "2 sets",
+ * with "+ 2 warmups" after when it has any.
+ */
 export function slotSummary(slot: WorkoutSlot): string {
-  const n = slot.sets.length;
-  const bodyweight = slot.exercise.uses_bodyweight;
-  let labels = slot.sets.map((s) => setLabel(s, bodyweight));
+  const warmups = warmupSets(slot.sets).length;
+  const summary = workingSummary(workingSets(slot.sets), slot.exercise.uses_bodyweight);
+  return warmups ? `${summary} + ${plural(warmups, "warmup")}` : summary;
+}
+
+function workingSummary(sets: WorkoutSet[], bodyweight: boolean): string {
+  const n = sets.length;
+  let labels = sets.map((s) => setLabel(s, bodyweight));
   if (!labels.some(Boolean)) return n === 1 ? `${n} set` : `${n} sets`;
   if (new Set(labels).size === 1) return `${n} × ${labels[0]}`;
   // Sets differ; if they all share a weight, say it once at the end.
-  const weights = new Set(slot.sets.map((s) => s.weight));
+  const weights = new Set(sets.map((s) => s.weight));
   let suffix = "";
   if (weights.size === 1 && !weights.has(null)) {
     suffix = ` @ ${weightLabel([...weights][0]!, bodyweight)}`;
-    labels = slot.sets.map((s) => setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, null, s.duration_seconds, s.distance));
+    labels = sets.map((s) => setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, null, s.duration_seconds, s.distance));
   }
   return `${n} sets: ` + labels.map((l) => l || "—").join(", ") + suffix;
 }
@@ -66,7 +81,7 @@ export function slotSummary(slot: WorkoutSlot): string {
 function toSet(r: Row): WorkoutSet {
   return {
     id: r.id, position: r.position, reps_min: r.reps_min, reps_max: r.reps_max, is_amrap: Boolean(r.is_amrap),
-    weight: r.weight, duration_seconds: r.duration_seconds, distance: r.distance,
+    weight: r.weight, duration_seconds: r.duration_seconds, distance: r.distance, is_warmup: Boolean(r.is_warmup),
   };
 }
 
@@ -118,6 +133,8 @@ export interface ItemSet {
   weight: unknown;
   time: unknown;
   distance: unknown;
+  /** A warmup set (agent-notes/warmups.md); never AMRAP. Optional so Flask-parity payloads still fit. */
+  warmup?: boolean;
 }
 export interface Item {
   exercise_id: number;
@@ -178,7 +195,8 @@ export function parseWorkoutItems(raw: unknown, exercisesById: Map<number, Exerc
     rawSets.forEach((rs, i) => {
       const n = i + 1;
       const rawSet = isObject(rs) ? rs : {};
-      const amrap = pyTruthy(rawSet.amrap) && exercise.tracks.reps;
+      const warmup = pyTruthy(rawSet.warmup);
+      const amrap = pyTruthy(rawSet.amrap) && exercise.tracks.reps && !warmup;
       let lo: number | null = null;
       let hi: number | null = null;
       if (exercise.tracks.reps && !amrap) {
@@ -203,9 +221,14 @@ export function parseWorkoutItems(raw: unknown, exercisesById: Map<number, Exerc
           }
         }
       }
-      sets.push({ min: lo, max: hi, amrap, weight: targets.weight, time: targets.time, distance: targets.distance });
+      const set: ItemSet = { min: lo, max: hi, amrap, weight: targets.weight, time: targets.time, distance: targets.distance };
+      if (warmup) set.warmup = true;
+      sets.push(set);
     });
+    // Warmups always come first (stable, so each kind keeps its order).
+    sets.sort((a, b) => Number(Boolean(b.warmup)) - Number(Boolean(a.warmup)));
     if (!sets.length) errors.push(`${exercise.name} needs at least one set.`);
+    else if (sets.every((s) => s.warmup)) errors.push(`${exercise.name} needs at least one set besides its warmups.`);
     items.push({ exercise_id: exercise.id, superset_next: pyTruthy(entry.superset_next), sets });
   }
   if (items.length) items.at(-1)!.superset_next = false; // nothing to link to
@@ -220,6 +243,7 @@ export function workoutToItems(workout: Workout): Item[] {
     superset_next: wx.superset_group !== null && i + 1 < slots.length && slots[i + 1].superset_group === wx.superset_group,
     sets: wx.sets.map((s) => ({
       min: s.reps_min, max: s.reps_max, amrap: s.is_amrap, weight: s.weight, time: s.duration_seconds, distance: s.distance,
+      ...(s.is_warmup ? { warmup: true } : {}),
     })),
   }));
 }
@@ -240,9 +264,9 @@ async function insertSlots(db: Db, workoutId: number, items: Item[]) {
     )).lastId;
     for (const [n, s] of item.sets.entries()) {
       await db.run(
-        `INSERT INTO workout_set (workout_exercise_id, position, reps_min, reps_max, is_amrap, weight, duration_seconds, distance)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [slotId, n + 1, s.min, s.max, s.amrap ? 1 : 0, s.weight ?? null, s.time ?? null, s.distance ?? null],
+        `INSERT INTO workout_set (workout_exercise_id, position, reps_min, reps_max, is_amrap, weight, duration_seconds, distance,
+           is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [slotId, n + 1, s.min, s.max, s.amrap ? 1 : 0, s.weight ?? null, s.time ?? null, s.distance ?? null, s.warmup ? 1 : 0],
       );
     }
     prevLinked = item.superset_next;
@@ -296,15 +320,45 @@ export function workoutMuscleSets(workout: Workout): Record<string, Record<Muscl
     for (const role of MUSCLE_ROLES) {
       for (const muscle of wx.exercise[role]) {
         totals[muscle] ??= { primary: 0, ancillary: 0 };
-        totals[muscle][role] += wx.sets.length;
+        totals[muscle][role] += workingSets(wx.sets).length; // warmups don't count (user)
       }
     }
   }
   return totals;
 }
 
-/** Planned sets in a workout: every set of every exercise (user requirement, 2026-10-20). */
-export const workoutSetCount = (workout: Workout) => workout.slots.reduce((n, wx) => n + wx.sets.length, 0);
+/** Planned sets in a workout: every working set of every exercise (user requirement, 2026-10-20; warmups left out). */
+export const workoutSetCount = (workout: Workout) => workout.slots.reduce((n, wx) => n + workingSets(wx.sets).length, 0);
+
+/**
+ * Adds a warmup after the plan slot's last warmup, copying that one's targets (blank when it has
+ * none), or removes its last warmup. For warmups changed on the day (agent-notes/warmups.md).
+ * Returns whether the plan changed.
+ */
+export async function changePlanWarmups(db: Db, slotId: number, add: boolean): Promise<boolean> {
+  const sets = (await db.all("SELECT * FROM workout_set WHERE workout_exercise_id = ? ORDER BY position", [slotId])).map(toSet);
+  const last = warmupSets(sets).at(-1);
+  if (!add && !last) return false;
+  const order = sets.map((s) => s.id as number | null);
+  await db.transaction(async () => {
+    if (add) {
+      const { lastId } = await db.run(
+        `INSERT INTO workout_set (workout_exercise_id, position, reps_min, reps_max, is_amrap, weight, duration_seconds, distance,
+           is_warmup) VALUES (?, ?, ?, ?, 0, ?, ?, ?, 1)`,
+        [slotId, sets.length + 1, last?.reps_min ?? null, last?.reps_max ?? null, last?.weight ?? null, last?.duration_seconds ?? null,
+          last?.distance ?? null],
+      );
+      order.splice(warmupSets(sets).length, 0, lastId);
+    } else {
+      await db.run("DELETE FROM workout_set WHERE id = ?", [last!.id]);
+      order.splice(order.indexOf(last!.id), 1);
+    }
+    // Park on negatives first so the (slot, position) unique key never collides.
+    for (const id of order) await db.run("UPDATE workout_set SET position = ? WHERE id = ?", [-id!, id]);
+    for (const [n, id] of order.entries()) await db.run("UPDATE workout_set SET position = ? WHERE id = ?", [n + 1, id]);
+  });
+  return true;
+}
 
 /** "1 set", "12 sets". */
 export const setsLabel = (n: number) => `${n} set${n === 1 ? "" : "s"}`;

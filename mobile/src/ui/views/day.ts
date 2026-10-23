@@ -101,10 +101,14 @@ async function dayView(ctx: Ctx, date: string) {
     await refresh();
   });
 
-  const setRow = (lx: LogEntry, s: LogSet, n: number) => html`
-    <div class="log-row${s.completed_at ? " done" : ""}" data-set=${s.id} data-rest=${restAfter.has(s.id) ? "1" : "0"}
-         data-bw-set=${s.uses_bodyweight ? "1" : "0"}>
-      <span class="set-num">${n}</span>
+  // Warmups (agent-notes/warmups.md) come first, numbered W1, W2…; working sets 1, 2…
+  const setRow = (lx: LogEntry, s: LogSet, i: number) => {
+    const n = lx.sets.slice(0, i + 1).filter((x) => x.is_warmup === s.is_warmup).length;
+    const label = s.is_warmup ? `Warmup ${n}` : `Set ${n}`;
+    return html`
+    <div class="log-row${s.completed_at ? " done" : ""}${s.is_warmup ? " warmup" : ""}" data-set=${s.id}
+         data-rest=${restAfter.has(s.id) ? "1" : "0"} data-bw-set=${s.uses_bodyweight ? "1" : "0"} data-warmup=${s.is_warmup ? "1" : "0"}>
+      <span class="set-num">${s.is_warmup ? `W${n}` : n}</span>
       ${lx.exercise.modes.map((m) => {
         const f = FIELDS[m];
         // Planned targets (snapshotted when the workout was loaded) show as placeholders.
@@ -122,16 +126,17 @@ async function dayView(ctx: Ctx, date: string) {
         }
         const input = html`<input type="text" inputmode=${f.inputmode} autocomplete="off" data-field=${f.field} .value=${value}
           placeholder=${target || (m === "time" ? "m:ss" : "–")}
-          aria-label="Set ${n} ${s.uses_bodyweight && m === "weight" ? "added weight" : f.label}${target ? `, target ${target}` : ""}">`;
+          aria-label="${label} ${s.uses_bodyweight && m === "weight" ? "added weight" : f.label}${target ? `, target ${target}` : ""}">`;
         if (!(s.uses_bodyweight && m === "weight")) return input;
         // A bodyweight set's field is the added weight (− for assistance); its total shows beneath,
         // from the placeholder while the field is blank (agent-notes/bodyweight.md).
         return html`<div class="bw-cell">${input}<span class="bw-sub">
-          <button type="button" class="bw-sign" data-sign aria-label="Set ${n}: switch between added weight and assistance">±</button>
+          <button type="button" class="bw-sign" data-sign aria-label="${label}: switch between added weight and assistance">±</button>
           <span class="bw-total" data-bw-total></span></span></div>`;
       })}
-      <button type="button" class="check" aria-pressed=${s.completed_at ? "true" : "false"} aria-label="Set ${n} completed">&#10003;</button>
+      <button type="button" class="check" aria-pressed=${s.completed_at ? "true" : "false"} aria-label="${label} completed">&#10003;</button>
     </div>`;
+  };
 
   // Superset toggle (user requirement): links this exercise with the one below it. Every card
   // but the day's last (and a workout's last) has one; it's pressed while the two are in the same superset.
@@ -202,11 +207,15 @@ async function dayView(ctx: Ctx, date: string) {
           <span>Set</span>${lx.exercise.modes.map((m) => html`<span>${m === "weight" && lx.sets.some((s) => s.uses_bodyweight)
             ? "± lb" : FIELDS[m].label}${m === "reps" ? repRangeNote(lx) : ""}</span>`)}<span>Done</span>
         </div>
-        ${lx.sets.map((s, i) => setRow(lx, s, i + 1))}
+        ${lx.sets.map((s, i) => setRow(lx, s, i))}
       </div>
       <div class="log-actions">
         <button type="button" class="button subtle small" data-act="add-set" data-lx=${lx.id}>+ Set</button>
-        <button type="button" class="button subtle small" data-act="remove-set" data-lx=${lx.id} ?disabled=${lx.sets.length === 1}>&minus; Set</button>
+        <button type="button" class="button subtle small" data-act="remove-set" data-lx=${lx.id}
+                ?disabled=${lx.sets.filter((s) => !s.is_warmup).length <= 1}>&minus; Set</button>
+        <button type="button" class="button subtle small" data-act="add-warmup" data-lx=${lx.id}>+ Warmup</button>
+        <button type="button" class="button subtle small" data-act="remove-warmup" data-lx=${lx.id}
+                ?disabled=${!lx.sets.some((s) => s.is_warmup)}>&minus; Warmup</button>
         ${supersetButton(lx)}
       </div>
       </div>
@@ -637,7 +646,8 @@ function mountDay(
       const later = rows.slice(rows.indexOf(input.closest<HTMLElement>("[data-set]")!) + 1);
       mirror = {
         source: input,
-        targets: later.filter((r) => !r.classList.contains("done"))
+        // Same kind only: a warmup's weight never fills working sets, or the other way round.
+        targets: later.filter((r) => !r.classList.contains("done") && r.dataset.warmup === input.closest<HTMLElement>("[data-set]")!.dataset.warmup)
           .map((r) => r.querySelector<HTMLInputElement>(`input[data-field="${input.dataset.field}"]`)!)
           .filter((t) => !t.value),
       };
@@ -811,11 +821,18 @@ function mountDay(
   // ---------- add / remove sets ----------
   on(dayEl, "click", async (e: Event) => {
     const btn = (e.target as Element).closest<HTMLButtonElement>("[data-act]");
-    if (!btn || (btn.dataset.act !== "add-set" && btn.dataset.act !== "remove-set")) return;
+    if (!btn || !["add-set", "remove-set", "add-warmup", "remove-warmup"].includes(btn.dataset.act!)) return;
     btn.disabled = true;
     try {
-      if (btn.dataset.act === "add-set") await day.addLogSet(db, Number(btn.dataset.lx));
-      else await day.removeLastLogSet(db, Number(btn.dataset.lx));
+      const lxId = Number(btn.dataset.lx);
+      if (btn.dataset.act === "add-set") await day.addLogSet(db, lxId);
+      else if (btn.dataset.act === "remove-set") await day.removeLastLogSet(db, lxId);
+      else {
+        // Warmups changed here carry over to the workout it came from (user).
+        const add = btn.dataset.act === "add-warmup";
+        const workout = await day.changeWarmups(db, lxId, add);
+        if (workout) flash(`${add ? "Added a warmup to" : "Removed a warmup from"} “${workout}” too.`);
+      }
       await refresh();
     } catch (err) {
       toast((err as Error).message);

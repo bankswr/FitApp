@@ -5,7 +5,7 @@
 // exercise's own, else the Settings default (5 lb unless changed). Deload days are never the reference.
 import { type Db, get } from "../db/types";
 import { ValidationError } from "./text";
-import type { WorkoutSet, WorkoutSlot } from "./workouts";
+import { type WorkoutSet, type WorkoutSlot, workingSets } from "./workouts";
 
 export const DEFAULT_REP_RANGE = { min: 8, max: 15 };
 export const WEIGHT_STEP = 5; // lb, the default until Settings changes it
@@ -124,10 +124,13 @@ export async function autoregulatedTargets(
         [wx.exercise.id, date],
       );
     }
-    const prevSets = entry ? await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? ORDER BY position", [entry.id]) : [];
-    result.push(wx.sets.map((ws, n) => {
-      const prev = prevSets[n];
-      if (!prev || !wx.exercise.tracks.reps) return null;
+    // Working sets match by position among working sets; warmups are never adjusted or a reference.
+    const prevSets = entry
+      ? await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? AND NOT is_warmup ORDER BY position", [entry.id]) : [];
+    const working = workingSets(wx.sets);
+    result.push(wx.sets.map((ws) => {
+      const prev = prevSets[working.indexOf(ws)];
+      if (ws.is_warmup || !prev || !wx.exercise.tracks.reps) return null;
       return nextTargets(
         prev as PreviousSet, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep, wx.exercise.uses_bodyweight,
       );

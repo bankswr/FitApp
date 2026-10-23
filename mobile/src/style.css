@@ -385,6 +385,8 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .set-head, .set-row { display: grid; gap: 6px; align-items: center; }
 .set-head { font-size: 0.75rem; color: var(--muted); text-align: center; margin: 0 0 4px; }
 .sets { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.set-row.warmup .set-num { font-size: 0.8rem; font-weight: 500; }
+.wx-set-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .set-num { width: 28px; flex-shrink: 0; text-align: center; color: var(--muted); font-weight: 600; }
 .set-row input[type="text"] {
   width: 100%;
@@ -738,6 +740,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .bw-missing { display: block; width: 100%; margin: 0 0 8px; padding: 0; border: 0; background: none; text-align: left; font: inherit; font-size: 0.85rem; color: var(--accent); cursor: pointer; }
 .log-row.done input[type="text"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .log-row.done .set-num { color: var(--accent); }
+.log-row.warmup .set-num { font-size: 0.8rem; font-weight: 500; }
 .check {
   min-height: 44px;
   border-radius: 10px;
@@ -1004,7 +1007,7 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .history-head .picker-meta { text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .history-sets { list-style: none; margin: 0; padding: 0; }
 .history-sets li { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; font-variant-numeric: tabular-nums; }
-.history-sets .set-num { width: 20px; font-size: 0.85rem; }
+.history-sets .set-num { width: 26px; font-size: 0.85rem; }
 .history-sets .picker-meta { margin-left: auto; }
 .history-sets li.not-done > span:nth-child(2) { color: var(--muted); }
 .history-more { margin-top: 10px; text-align: center; }

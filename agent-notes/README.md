@@ -27,3 +27,4 @@ Anything here is committed to git so future sessions can build on it.
 - [day-workouts.md](day-workouts.md) — each loaded workout on a day is a `log_workout` with its own times (schema v4, mobile only): agreed rules, build steps and status, grouping of old history
 - [autoregulation.md](autoregulation.md) — routine autoregulation rules (rep/weight targets from the last session), weight step (per exercise + Settings default), reference lookup, deload days, schemas v3/v5 (mobile only)
 - [bodyweight.md](bodyweight.md) — bodyweight exercises: signed added weight/assistance, per-day bodyweight, totals in volume/history, autoregulation without a 0 floor, per-set flag keeping old volume, default marked exercises (schema 6, mobile only)
+- [warmups.md](warmups.md) — warmup sets: first in an exercise, excluded from volume/set counts/autoregulation/rest timer, weight targets in the builder, day +/− Warmup carries the count back to the workout (schema 7, mobile only)

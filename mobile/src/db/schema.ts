@@ -194,6 +194,12 @@ export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
     `);
     await markDefaultBodyweightExercises(db);
   },
+  // 7: warmup sets (user, 2026-10-23; agent-notes/warmups.md). Not in Flask. Planned in workouts and
+  // logged on days, always before the working sets; no volume, no autoregulation.
+  `
+  ALTER TABLE workout_set ADD COLUMN is_warmup BOOLEAN NOT NULL DEFAULT 0;
+  ALTER TABLE log_set ADD COLUMN is_warmup BOOLEAN NOT NULL DEFAULT 0;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

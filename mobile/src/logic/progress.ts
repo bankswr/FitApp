@@ -26,7 +26,7 @@ export interface ProgressData {
 }
 
 /**
- * Only completed sets count. Volume = sum of weight × reps per day, where a bodyweight set's
+ * Only completed working sets count (warmups never do, agent-notes/warmups.md). Volume = sum of weight × reps per day, where a bodyweight set's
  * weight is its total (SET_LOAD_SQL). Muscle sets use the routine
  * weighting (primary 1, ancillary 0.5) with each exercise's current muscles; per week =
  * total × 7 / days in range.
@@ -35,7 +35,7 @@ export async function progressData(db: Db, start: string, end: string): Promise<
   const nDays = daysBetween(start, end) + 1;
   const volumeRows = await db.all(
     `SELECT lx.date, SUM((${SET_LOAD_SQL}) * ls.reps) AS volume FROM log_exercise lx JOIN log_set ls ON ls.log_exercise_id = lx.id
-     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND ls.reps IS NOT NULL
+     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND NOT ls.is_warmup AND ls.reps IS NOT NULL
        AND (ls.weight IS NOT NULL OR ls.uses_bodyweight)
      GROUP BY lx.date`,
     [start, end],
@@ -48,7 +48,7 @@ export async function progressData(db: Db, start: string, end: string): Promise<
 
   const setRows = await db.all(
     `SELECT lx.exercise_id, COUNT(ls.id) AS n FROM log_exercise lx JOIN log_set ls ON ls.log_exercise_id = lx.id
-     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL GROUP BY lx.exercise_id`,
+     WHERE lx.date >= ? AND lx.date <= ? AND ls.completed_at IS NOT NULL AND NOT ls.is_warmup GROUP BY lx.exercise_id`,
     [start, end],
   );
   const setsByExercise = new Map(setRows.map((r) => [r.exercise_id as number, r.n as number]));
