@@ -57,23 +57,26 @@ export interface PreviousSet {
 
 /**
  * The next targets for one set, from the same set last time. `plan` gives the rep range and the
- * fallback weight; `tracksWeight` is false for exercises that only track reps.
+ * fallback weight; `tracksWeight` is false for exercises that only track reps. For a bodyweight
+ * exercise (agent-notes/bodyweight.md) the weight is the added weight: blank counts as 0 and it
+ * may go below 0 (assistance), so the total follows the step.
  */
 export function nextTargets(
   prev: PreviousSet, plan: Pick<WorkoutSet, "reps_min" | "reps_max" | "is_amrap" | "weight">, tracksWeight: boolean, step = WEIGHT_STEP,
+  bodyweight = false,
 ): SetTargets {
   const { min, max } = repRange(plan);
   // Not checked off (or no reps typed): carry the previous targets forward unchanged.
   if (prev.completed_at === null || prev.reps === null) {
     return { reps: prev.target_reps ?? null, weight: tracksWeight ? (prev.target_weight ?? plan.weight) : plan.weight };
   }
-  const weight: number | null = tracksWeight ? (prev.weight ?? prev.target_weight ?? plan.weight) : null;
+  const weight: number | null = tracksWeight ? (prev.weight ?? prev.target_weight ?? plan.weight ?? (bodyweight ? 0 : null)) : null;
   const reps: number = prev.reps;
   // AMRAP (user requirement): reps follow the same +1 / match rule with no range, and the weight
   // is carried over unchanged. Changing it is left to the user.
   if (plan.is_amrap) return { reps: reps >= (prev.target_reps ?? reps) ? reps + 1 : reps, weight };
   const target: number = prev.target_reps ?? min; // the first autoregulated session compares with the minimum
-  if (reps < min) return { reps: min, weight: weight === null ? null : Math.max(0, weight - step) };
+  if (reps < min) return { reps: min, weight: weight === null ? null : bodyweight ? weight - step : Math.max(0, weight - step) };
   const next = reps >= target ? reps + 1 : reps;
   if (next > max) {
     // No weight to raise (bodyweight): hold at the top of the range instead.
@@ -125,7 +128,9 @@ export async function autoregulatedTargets(
     result.push(wx.sets.map((ws, n) => {
       const prev = prevSets[n];
       if (!prev || !wx.exercise.tracks.reps) return null;
-      return nextTargets(prev as PreviousSet, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep);
+      return nextTargets(
+        prev as PreviousSet, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep, wx.exercise.uses_bodyweight,
+      );
     }));
   }
   return result;

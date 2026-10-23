@@ -23,7 +23,7 @@ export function historyList(exercise: Exercise, sessions: Session[], today: stri
               ${s.sets.map((set, i) => html`
                 <li class=${set.completed_at ? "" : "not-done"}>
                   <span class="set-num">${i + 1}</span>
-                  <span>${setResult(set, exercise)}</span>
+                  <span>${setResult(set, exercise, s.bodyweight)}</span>
                   ${set.completed_at ? "" : html`<span class="picker-meta">not checked off</span>`}
                 </li>`)}
             </ol>` : ""}

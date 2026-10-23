@@ -5,7 +5,7 @@ import { repTargetLabel } from "../src/logic/text";
 const set = (t: Partial<LogSet>): LogSet => withLabel({
   id: 1, position: 1, target_reps_min: null, target_reps_max: null, target_amrap: false,
   target_reps: null, target_weight: null, target_duration_seconds: null, target_distance: null,
-  weight: null, reps: null, duration_seconds: null, distance: null, completed_at: null, target_label: "", ...t,
+  weight: null, reps: null, duration_seconds: null, distance: null, completed_at: null, uses_bodyweight: false, target_label: "", ...t,
 });
 // The label as toLogSet builds it.
 const withLabel = (s: LogSet): LogSet =>

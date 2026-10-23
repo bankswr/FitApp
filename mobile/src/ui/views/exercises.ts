@@ -58,7 +58,8 @@ route(/^\/exercises$/, async (ctx) => {
             <li class="card-wrap" data-i=${i}>
               <a class="card card-link" href="#/exercises/${ex.id}">
                 <h2>${ex.name}</h2>
-                <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}</div>
+                <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight
+                  ? html`<span class="badge">Bodyweight</span>` : ""}</div>
                 <p class="muscles"><strong>Primary:</strong> ${ex.primary.join(", ")}</p>
                 ${ex.ancillary.length ? html`<p class="muscles"><strong>Ancillary:</strong> ${ex.ancillary.join(", ")}</p>` : ""}
               </a>
@@ -99,7 +100,8 @@ route(/^\/exercises\/(\d+)$/, async (ctx) => {
         <a class="button subtle" href="#/exercises/${ex.id}/edit">Edit</a>
       </header>
       <section class="card exercise-info">
-        <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}</div>
+        <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight
+                  ? html`<span class="badge">Bodyweight</span>` : ""}</div>
         <p class="muscles"><strong>Primary:</strong> ${ex.primary.join(", ")}</p>
         ${ex.ancillary.length ? html`<p class="muscles"><strong>Ancillary:</strong> ${ex.ancillary.join(", ")}</p>` : ""}
         ${ex.note ? html`<p class="note exercise-note">${ex.note}</p>` : ""}
@@ -133,9 +135,9 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
   const form: ExerciseForm = stashed?.form ?? (exercise
     ? {
       name: exercise.name, tracking: exercise.modes, primary: exercise.primary, ancillary: exercise.ancillary,
-      note: exercise.note ?? "", weight_step: formatNumber(exercise.weight_step),
+      note: exercise.note ?? "", weight_step: formatNumber(exercise.weight_step), uses_bodyweight: exercise.uses_bodyweight,
     }
-    : { name: "", tracking: [], primary: [], ancillary: [], note: "", weight_step: "" });
+    : { name: "", tracking: [], primary: [], ancillary: [], note: "", weight_step: "", uses_bodyweight: false });
   const errors = stashed?.errors ?? [];
   const muscles = await muscleChoices(ctx.db, [...form.primary, ...form.ancillary]);
   const selected = Object.fromEntries(MUSCLE_ROLES.map((r) => [r, new Set(form[r].map((m) => m.toLowerCase()))]));
@@ -187,6 +189,13 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
               </label>`)}
           </div>
         </fieldset>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="uses_bodyweight" id="uses_bodyweight" ?checked=${form.uses_bodyweight}>
+            <span>Bodyweight exercise</span>
+          </label>
+          <p class="hint">${HELP.exerciseForm.bodyweight}</p>
+        </div>
         <div class="field" id="weight-step-field" ?hidden=${!form.tracking.includes("weight")}>
           <label for="weight_step">Autoregulation weight step</label>
           <p class="hint">${HELP.exerciseForm.weightStep(weightStepDefault())}</p>
@@ -209,7 +218,16 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
       const stepField = root.querySelector<HTMLElement>("#weight-step-field")!;
       mountWeightStep(stepField.querySelector("[data-weight-step]")!, signal);
       const weightBox = root.querySelector<HTMLInputElement>('input[name="tracking"][value="weight"]')!;
-      weightBox.addEventListener("change", () => (stepField.hidden = !weightBox.checked), { signal });
+      // A bodyweight exercise logs added weight, so the two boxes go together.
+      const bodyweightBox = root.querySelector<HTMLInputElement>("#uses_bodyweight")!;
+      weightBox.addEventListener("change", () => {
+        stepField.hidden = !weightBox.checked;
+        if (!weightBox.checked) bodyweightBox.checked = false;
+      }, { signal });
+      bodyweightBox.addEventListener("change", () => {
+        if (bodyweightBox.checked) weightBox.checked = true;
+        stepField.hidden = !weightBox.checked;
+      }, { signal });
       if (focusNameOnMount) root.querySelector<HTMLInputElement>("#name")!.focus();
       focusNameOnMount = false;
       const formEl = root.querySelector<HTMLFormElement>("#exercise-form")!;
@@ -223,6 +241,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
           ancillary: data.getAll("ancillary").map(String),
           note: String(data.get("note") ?? ""),
           weight_step: String(data.get("weight_step") ?? ""),
+          uses_bodyweight: data.has("uses_bodyweight"),
         };
         const result = await saveExercise(ctx.db, exercise?.id ?? null, input);
         if (result.ok) {

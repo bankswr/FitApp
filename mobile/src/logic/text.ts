@@ -136,11 +136,14 @@ function pyFloat(value: unknown): number {
   throw new TypeError();
 }
 
-/** Blank -> null; otherwise a finite number in [0, maximum]. Throws ValidationError with a user message. */
+/**
+ * Blank -> null; otherwise a finite number in [minimum, maximum] (minimum 0 unless given, e.g. a
+ * bodyweight exercise's assistance). Throws ValidationError with a user message.
+ */
 export function parseLogValue(
   value: unknown,
   label: string,
-  { integer, maximum }: { integer: boolean; maximum: number },
+  { integer, maximum, minimum = 0 }: { integer: boolean; maximum: number; minimum?: number },
 ): number | null {
   if (value == null || value === "") return null;
   if (typeof value === "boolean") throw new ValidationError(`${label} must be a number.`);
@@ -150,8 +153,9 @@ export function parseLogValue(
   } catch {
     throw new ValidationError(`${label} must be a number.`);
   }
-  if (!Number.isFinite(number) || !(number >= 0 && number <= maximum)) {
-    throw new ValidationError(`${label} must be between 0 and ${withCommas(maximum)}.`);
+  if (!Number.isFinite(number) || !(number >= minimum && number <= maximum)) {
+    const low = minimum < 0 ? `−${withCommas(-minimum)}` : withCommas(minimum);
+    throw new ValidationError(`${label} must be between ${low} and ${withCommas(maximum)}.`);
   }
   if (integer) {
     if (number !== Math.trunc(number)) throw new ValidationError(`${label} must be a whole number.`);
@@ -209,13 +213,20 @@ export function repTargetLabel(lo: number | null, hi: number | null, amrap: bool
   return "";
 }
 
+/** Weight as labelled: "135 lb", or for a bodyweight exercise the added weight, "BW +10 lb" / "BW −40 lb" / "BW". */
+export function weightLabel(weight: number, bodyweight = false): string {
+  if (!bodyweight) return `${formatG(weight)} lb`;
+  if (!weight) return "BW";
+  return `BW ${weight > 0 ? "+" : "−"}${formatG(Math.abs(weight))} lb`;
+}
+
 /** A planned set in brief, e.g. "8–12 @ 135 lb", "50 lb · 0:45", "25:00 · 3 mi", or "". */
 export function setTargetLabel(
   repsMin: number | null, repsMax: number | null, amrap: boolean | number,
-  weight: number | null, seconds: number | null, distance: number | null,
+  weight: number | null, seconds: number | null, distance: number | null, bodyweight = false,
 ): string {
   let head = repTargetLabel(repsMin, repsMax, amrap);
-  if (weight != null) head = head ? `${head} @ ${formatG(weight)} lb` : `${formatG(weight)} lb`;
+  if (weight != null) head = head ? `${head} @ ${weightLabel(weight, bodyweight)}` : weightLabel(weight, bodyweight);
   const parts = [head, formatDuration(seconds), distance != null ? `${formatG(distance)} mi` : ""];
   return parts.filter(Boolean).join(" · ");
 }

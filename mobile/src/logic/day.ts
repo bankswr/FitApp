@@ -4,6 +4,7 @@ import { type Db, get, type Row, utcNow } from "../db/types";
 import {
   type Autoregulate, autoregulatedTargets, defaultStepOf, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
 } from "./autoregulation";
+import { bodyweightOn, listBodyweights } from "./bodyweight";
 import { joinDayWorkout, pruneLogWorkouts, workoutForNewExercises } from "./dayWorkouts";
 import { ConflictError, NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
@@ -27,6 +28,8 @@ export interface LogSet {
   duration_seconds: number | null;
   distance: number | null;
   completed_at: string | null;
+  /** Counts the day's bodyweight: weight is added (+) or assistance (−). Fixed once the set is recorded. */
+  uses_bodyweight: boolean;
   /** Rep target in brief ("11", "8–12", "AMRAP", ""), for the reps field's placeholder. */
   target_label: string;
 }
@@ -41,6 +44,8 @@ export interface LogEntry {
   workout_id: number | null;
   workout_name: string | null;
   log_workout_id: number | null;
+  /** The bodyweight that applies on this date (logic/bodyweight.ts), or null when none is recorded. */
+  bodyweight: number | null;
   sets: LogSet[];
 }
 
@@ -50,6 +55,7 @@ export function toLogSet(r: Row): LogSet {
     target_reps_min: r.target_reps_min, target_reps_max: r.target_reps_max, target_amrap: Boolean(r.target_amrap),
     target_reps: r.target_reps ?? null, target_weight: r.target_weight, target_duration_seconds: r.target_duration_seconds, target_distance: r.target_distance,
     weight: r.weight, reps: r.reps, duration_seconds: r.duration_seconds, distance: r.distance, completed_at: r.completed_at,
+    uses_bodyweight: Boolean(r.uses_bodyweight),
     target_label: r.target_reps != null ? String(r.target_reps) : repTargetLabel(r.target_reps_min, r.target_reps_max, Boolean(r.target_amrap)),
   };
 }
@@ -68,7 +74,7 @@ export const setState = (s: LogSet) => ({
  */
 export function targetValues(s: LogSet): Record<string, number | null> {
   return {
-    weight: s.target_weight,
+    weight: s.target_weight ?? (s.uses_bodyweight ? 0 : null), // a bodyweight set with no target: bodyweight alone
     reps: /^\d+$/.test(s.target_label) ? Number(s.target_label) : null,
     duration_seconds: s.target_duration_seconds,
     distance: s.target_distance,
@@ -92,10 +98,12 @@ export async function loadEntries(db: Db, where: string, params: unknown[]): Pro
     `SELECT * FROM log_set WHERE log_exercise_id IN (${ids.map(() => "?").join(",")}) ORDER BY log_exercise_id, position`, ids,
   );
   const exercises = new Map((await listExercises(db, [...new Set(rows.map((r) => r.exercise_id as number))])).map((e) => [e.id, e]));
+  const bodyweights = await listBodyweights(db);
   return rows.map((r) => ({
     id: r.id, date: r.date, position: r.position, superset_group: r.superset_group, note: r.note,
     exercise: exercises.get(r.exercise_id)!, workout_id: r.workout_id, workout_name: r.workout_name,
     log_workout_id: r.log_workout_id,
+    bodyweight: bodyweightOn(bodyweights, r.date)?.weight ?? null,
     sets: sets.filter((s) => s.log_exercise_id === r.id).map(toLogSet),
   }));
 }
@@ -172,9 +180,9 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
         const a = adjusted?.[i]?.[n];
         await db.run(
           `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_reps,
-             target_weight, target_duration_seconds, target_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             target_weight, target_duration_seconds, target_distance, uses_bodyweight) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [entryId, n + 1, ws.reps_min, ws.reps_max, ws.is_amrap ? 1 : 0, a ? a.reps : null, a ? a.weight : ws.weight,
-            ws.duration_seconds, ws.distance],
+            ws.duration_seconds, ws.distance, wx.exercise.uses_bodyweight ? 1 : 0],
         );
       }
       position++;
@@ -229,9 +237,13 @@ export async function addExercises(db: Db, date: string, ids: unknown, autoregul
         "INSERT INTO log_exercise (date, position, exercise_id) VALUES (?, ?, ?)", [date, position + offset, exerciseId],
       )).lastId;
       added.push(entryId);
-      const count = byId.get(exerciseId)!.tracks.reps ? 3 : 1;
-      for (let n = 1; n <= count; n++) await db.run("INSERT INTO log_set (log_exercise_id, position) VALUES (?, ?)", [entryId, n]);
-      if (autoregulate && byId.get(exerciseId)!.tracks.reps) await targetsFromLastSession(db, entryId, defaultStepOf(autoregulate));
+      const exercise = byId.get(exerciseId)!;
+      const count = exercise.tracks.reps ? 3 : 1;
+      for (let n = 1; n <= count; n++) {
+        await db.run("INSERT INTO log_set (log_exercise_id, position, uses_bodyweight) VALUES (?, ?, ?)",
+          [entryId, n, exercise.uses_bodyweight ? 1 : 0]);
+      }
+      if (autoregulate && exercise.tracks.reps) await targetsFromLastSession(db, entryId, defaultStepOf(autoregulate));
     }
     const target = joinWorkout ? await workoutForNewExercises(db, date) : null;
     if (target !== null) await joinDayWorkout(db, date, target, added);
@@ -328,7 +340,9 @@ export async function updateSet(db: Db, setId: number, data: Record<string, unkn
   const current = await getSet(db, setId);
   const updates: [string, unknown][] = [];
   for (const [field, spec] of Object.entries(LOG_FIELDS)) {
-    if (field in data) updates.push([field, parseLogValue(data[field], spec.label, spec)]);
+    // A bodyweight set's weight is added weight, negative for assistance.
+    const minimum = field === "weight" && current.uses_bodyweight ? -spec.maximum : 0;
+    if (field in data) updates.push([field, parseLogValue(data[field], spec.label, { ...spec, minimum })]);
   }
   if ("completed" in data) {
     updates.push(["completed_at", pyTruthy(data.completed) ? (current.completed_at ?? utcNow()) : null]);
@@ -366,7 +380,9 @@ async function targetsFromLastSession(db: Db, entryId: number, defaultStep: numb
     if (!prevSets[n]) break;
     if (s.completed_at !== null) continue;
     const plan = { reps_min: s.target_reps_min, reps_max: s.target_reps_max, is_amrap: s.target_amrap, weight: s.target_weight };
-    const t = nextTargets(prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight, entry.exercise.weight_step ?? defaultStep);
+    const t = nextTargets(
+      prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight, entry.exercise.weight_step ?? defaultStep, entry.exercise.uses_bodyweight,
+    );
     const updates: [string, number | null][] = [];
     if (s.reps === null) updates.push(["target_reps", t.reps]);
     if (s.weight === null) updates.push(["target_weight", t.weight]);
@@ -383,9 +399,10 @@ export async function addLogSet(db: Db, entryId: number) {
   const last = entry.sets.at(-1);
   const { lastId } = await db.run(
     `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_reps,
-       target_weight, target_duration_seconds, target_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       target_weight, target_duration_seconds, target_distance, uses_bodyweight) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [entryId, last ? last.position + 1 : 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null,
-      last?.target_amrap ? 1 : 0, last?.target_reps ?? null, last?.target_weight ?? null, last?.target_duration_seconds ?? null, last?.target_distance ?? null],
+      last?.target_amrap ? 1 : 0, last?.target_reps ?? null, last?.target_weight ?? null, last?.target_duration_seconds ?? null, last?.target_distance ?? null,
+      entry.exercise.uses_bodyweight ? 1 : 0],
   );
   return setState(await getSet(db, lastId));
 }
@@ -436,6 +453,7 @@ export async function clearDay(db: Db, date: string): Promise<number> {
     await db.run("DELETE FROM log_exercise WHERE date = ?", [date]);
     await db.run("DELETE FROM log_workout WHERE date = ?", [date]);
     await db.run("DELETE FROM deload_day WHERE date = ?", [date]); // the deload mark goes too (user)
+    await db.run("DELETE FROM bodyweight WHERE date = ?", [date]); // and the day's bodyweight, like the deload mark
   });
   return n;
 }

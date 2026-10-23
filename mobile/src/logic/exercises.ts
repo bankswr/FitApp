@@ -1,6 +1,7 @@
 // Exercises: listing, the add/edit form, delete rules, and picker data. Ported from app.py.
 import { type Db, get, utcNow } from "../db/types";
 import { parseWeightStep } from "./autoregulation";
+import { DEFAULT_BODYWEIGHT_EXERCISES, UNRECORDED_SET_SQL } from "./bodyweight";
 import { NotFoundError } from "./errors";
 import { compareMuscles, getOrCreateMuscle, orderedMuscleGroups } from "./muscles";
 import {
@@ -17,6 +18,8 @@ export interface Exercise {
   tracks: Record<TrackingMode, boolean>;
   /** Autoregulation's weight step for this exercise (lb); null uses the Settings default. Mobile only (schema 5). */
   weight_step: number | null;
+  /** Logs added weight / assistance on top of the day's bodyweight. Mobile only (schema 6; logic/bodyweight.ts). */
+  uses_bodyweight: boolean;
 }
 
 /** Every exercise (by name), with tracking modes and muscle names in canonical order. */
@@ -34,7 +37,7 @@ export async function listExercises(db: Db, ids?: number[]): Promise<Exercise[]>
         .sort(compareMuscles)
         .map((m) => m.name);
     return {
-      id: r.id, name: r.name, note: r.note, tracks, weight_step: r.weight_step ?? null,
+      id: r.id, name: r.name, note: r.note, tracks, weight_step: r.weight_step ?? null, uses_bodyweight: Boolean(r.uses_bodyweight),
       modes: TRACKING_MODES.filter((m) => tracks[m]),
       primary: muscles("primary"), ancillary: muscles("ancillary"),
     };
@@ -72,6 +75,8 @@ export interface ExerciseForm {
   note: string;
   /** Typed weight step; blank or missing → null (the default). Optional so Flask-parity forms still fit. */
   weight_step?: string;
+  /** Bodyweight exercise; it implies tracking weight. Optional so Flask-parity forms still fit. */
+  uses_bodyweight?: boolean;
 }
 
 export type SaveResult = { ok: true; id: number; name: string } | { ok: false; errors: string[]; form: ExerciseForm };
@@ -87,7 +92,12 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     ancillary: [],
     note: input.note ?? "",
     weight_step: input.weight_step ?? "",
+    uses_bodyweight: Boolean(input.uses_bodyweight),
   };
+  // A bodyweight exercise logs added weight, so it tracks weight (in the usual mode order).
+  if (form.uses_bodyweight && !form.tracking.includes("weight")) {
+    form.tracking = TRACKING_MODES.filter((m) => m === "weight" || form.tracking.includes(m));
+  }
   const primaryLower = new Set(form.primary.map((m) => m.toLowerCase()));
   form.ancillary = cleanMuscles(input.ancillary ?? []).filter((m) => !primaryLower.has(m.toLowerCase()));
 
@@ -117,20 +127,29 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
   if (errors.length) return { ok: false, errors, form };
 
   const tracks = Object.fromEntries(TRACKING_MODES.map((m) => [m, form.tracking.includes(m) ? 1 : 0]));
+  const bodyweight = form.uses_bodyweight ? 1 : 0;
   const savedId = await db.transaction(async () => {
     let exerciseId = id;
     if (exerciseId === null) {
       exerciseId = (await db.run(
-        `INSERT INTO exercise (name, note, tracks_weight, tracks_reps, tracks_time, tracks_distance, weight_step, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, utcNow()],
+        `INSERT INTO exercise (name, note, tracks_weight, tracks_reps, tracks_time, tracks_distance, weight_step, uses_bodyweight,
+           created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, utcNow()],
       )).lastId;
     } else {
       await db.run("DELETE FROM exercise_muscle WHERE exercise_id = ?", [exerciseId]);
       await db.run(
         `UPDATE exercise SET name = ?, note = ?, tracks_weight = ?, tracks_reps = ?, tracks_time = ?, tracks_distance = ?,
-           weight_step = ? WHERE id = ?`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, exerciseId],
+           weight_step = ?, uses_bodyweight = ? WHERE id = ?`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, exerciseId],
+      );
+      // Sets with nothing recorded yet follow the new setting; recorded ones keep theirs, so
+      // history and volume never change (user, 2026-10-23). Assistance can't be a plain target.
+      await db.run(
+        `UPDATE log_set SET uses_bodyweight = ?,
+           target_weight = CASE WHEN ? = 0 AND target_weight < 0 THEN NULL ELSE target_weight END
+         WHERE ${UNRECORDED_SET_SQL} AND log_exercise_id IN (SELECT id FROM log_exercise WHERE exercise_id = ?)`,
+        [bodyweight, bodyweight, exerciseId],
       );
       // Targets for a mode the exercise no longer tracks are meaningless; clear them from workouts.
       const stale: string[] = [];
@@ -254,7 +273,8 @@ export async function seedDefaultExercises(db: Db): Promise<void> {
     for (const { name, primary, ancillary } of DEFAULT_EXERCISES) {
       if (await get(db, "SELECT 1 FROM exercise WHERE name = ?", [name])) continue;
       const exerciseId = (await db.run(
-        "INSERT INTO exercise (name, tracks_weight, tracks_reps, created_at) VALUES (?, 1, 1, ?)", [name, utcNow()],
+        "INSERT INTO exercise (name, tracks_weight, tracks_reps, uses_bodyweight, created_at) VALUES (?, 1, 1, ?, ?)",
+        [name, DEFAULT_BODYWEIGHT_EXERCISES.includes(name) ? 1 : 0, utcNow()],
       )).lastId;
       for (const [role, muscles] of [["primary", primary], ["ancillary", ancillary]] as const) {
         for (const muscle of muscles) {

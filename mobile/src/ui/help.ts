@@ -20,6 +20,8 @@ export const HELP = {
     exerciseNote: "Shown whenever you do this exercise.",
     sessionNote: (dayLabel: string) => `Only for ${dayLabel}. Kept in the exercise’s history.`,
     workoutTimes: "Blank means unknown and is left out of stats. A finish earlier than the start is the next day.",
+    bodyweightFrom: (when: string) => `From ${when}. Enter today's if it changed.`,
+    bodyweightMissing: "Enter your bodyweight at the top of the day to see totals.",
   },
 
   routineEditor: {
@@ -49,12 +51,15 @@ export const HELP = {
     weightStep: (defaultStep: number) =>
       html`How much autoregulation moves this exercise's weight. Leave blank to use the Settings
         default (${formatNumber(defaultStep)}&nbsp;lb).`,
+    bodyweight: `Log the weight you add (a belt or vest) or, as a negative number, the assistance (a machine or
+      band). Each set's total is your bodyweight for that day plus that number, and autoregulation steps the added
+      weight. Sets logged before you turn this on keep their weight and volume.`,
     note: "Shown every time you do this exercise, e.g. seat height or form cues (optional).",
   },
 
   progress: {
     range: "Only completed (✓) sets count.",
-    volume: "Sum of weight × reps across completed sets, in lb.",
+    volume: "Sum of weight × reps across completed sets, in lb. Bodyweight exercises count their total weight.",
     muscleSets: (nDays: number) => `Completed sets in this range: primary muscle ${MUSCLE_SET_WEIGHTS.primary} per set,
       ancillary ${MUSCLE_SET_WEIGHTS.ancillary}. Per week = total × 7 ÷ ${nDays} days. Enter a weekly minimum for
       each group (or load a preset). Bars are scaled to the group with the most sets; the tick marks the minimum,

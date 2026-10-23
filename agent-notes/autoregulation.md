@@ -1,7 +1,7 @@
 # Autoregulation
 How autoregulation sets rep and weight targets from the previous session, and how deload days fit in. Mobile app only (`mobile/src/logic/autoregulation.ts`), not in Flask.
 
-Last updated: 2026-10-18
+Last updated: 2026-10-23
 
 ## Rules (user requirement, 2026-10-04)
 - **One switch in Settings (user requirement, 2026-10-10):** **Autoregulation** on the Settings screen, per device (`fitapp.autoregulate` in localStorage via `ui/prefs.ts`, off by default). The day view passes it to `loadRoutine` / `loadWorkout` / `addExercises` as an `autoregulate` argument (default false, so the logic stays Flask-parity when off). It replaced the per-routine checkbox: `routine.autoregulate` is still stored, imported and exported, and kept through edits by a hidden field in the routine editor, but nothing reads it.
@@ -16,7 +16,7 @@ Last updated: 2026-10-18
 - A set not checked off, or checked with no reps, **copies the previous targets** (`target_reps`, `target_weight`). Typed-but-unchecked values don't count; the user reconfirmed this on 2026-10-04 after test days with only typed values produced blank targets.
 - **AMRAP sets (user, 2026-10-04):** reps follow the same rule with no range (`r + 1` if `r ≥ t`, else `r`; first time `t = r`), and the weight is carried over as `w`, **never adjusted**: changing it is left to the user. No step down when reps drop.
 - Not adjusted (plan targets kept): exercises that don't track reps, and sets with no matching set last time (e.g. a set added to the plan).
-- Bodyweight (no weight logged or targeted, or the exercise doesn't track weight): reps only, held at the range maximum instead of adding weight. The user didn't rule on this case explicitly.
+- Unmarked exercises with no weight (none logged or targeted, or weight not tracked): reps only, held at the range maximum instead of adding weight. The user didn't rule on this case explicitly. Exercises marked **Bodyweight** step their added weight instead, below 0 for assistance (see `bodyweight.md`).
 
 ## AR button on day cards (user requirement, 2026-10-10)
 - Each day card for an exercise that tracks reps has an **AR** button: since 2026-10-15 in the card's swipe tray, a dial icon since 2026-10-18 (the wrench there now edits the exercise) (see `stack-decisions.md`). It sets that entry's targets by the rules above (`autoregulateEntry` in `logic/day.ts`), from the **exercise's** latest non-deload entry before that day, from any source (ad hoc or a workout; the workout doesn't matter). Sets match by position.

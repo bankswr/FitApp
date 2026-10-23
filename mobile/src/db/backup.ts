@@ -5,6 +5,7 @@
 //     "tables": { "muscle_group": [{...row}], "exercise": [...], ... } }
 //
 // Import replaces everything, in one transaction: a bad file leaves the data untouched.
+import { markDefaultBodyweightExercises } from "../logic/bodyweight";
 import { groupLogWorkouts } from "../logic/dayWorkouts";
 import { SCHEMA_VERSION, TABLES } from "./schema";
 import { type Db, type Row, utcNow } from "./types";
@@ -44,7 +45,9 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
   // (progress_target, deload_day) and columns with defaults (routine.autoregulate,
   // log_set.target_reps), so an older backup (e.g. from Flask) simply has none of them. Schema 4
   // added log_workout: an older backup's history is grouped into workouts after it's loaded.
-  // Schema 5 added exercise.weight_step (nullable), so older backups need nothing.
+  // Schema 5 added exercise.weight_step (nullable), so older backups need nothing. Schema 6 added
+  // bodyweight and uses_bodyweight flags (default 0): an older backup gets the default bodyweight
+  // exercises marked, as the migration does; its logged sets keep their volume.
   const tables = backup.tables;
   if (!tables || typeof tables !== "object") throw new BackupError("The backup has no data.");
   const unknown = Object.keys(tables).filter((t) => !(TABLES as readonly string[]).includes(t));
@@ -70,6 +73,7 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
       counts[table] = rows.length;
     }
     if (backup.schema! < 4) await groupLogWorkouts(db);
+    if (backup.schema! < 6) await markDefaultBodyweightExercises(db);
     const broken = await db.all("PRAGMA foreign_key_check");
     if (broken.length) throw new BackupError("The backup's data is inconsistent (broken references).");
   });

@@ -3,12 +3,15 @@ import type { Db } from "../db/types";
 import { type LogSet, loadEntries } from "./day";
 import type { Exercise } from "./exercises";
 import { checkDate } from "./day";
-import { formatDuration, formatG } from "./text";
+import { setTotal, signedAdded } from "./bodyweight";
+import { formatDuration, formatG, weightLabel } from "./text";
 
 export const HISTORY_LIMIT = 60; // most recent dates shown
 
 export interface Session {
   date: string;
+  /** The bodyweight that applies on this date, for bodyweight sets' totals (null: none recorded). */
+  bodyweight: number | null;
   workouts: string[];
   sets: LogSet[];
   notes: string[];
@@ -32,7 +35,7 @@ export async function exerciseHistory(db: Db, exercise: Exercise, before?: strin
     if (!recorded.length && !lx.note) continue;
     if (sessions.at(-1)?.date !== lx.date) {
       if (sessions.length === HISTORY_LIMIT) break;
-      sessions.push({ date: lx.date, workouts: [], sets: [], notes: [] });
+      sessions.push({ date: lx.date, bodyweight: lx.bodyweight, workouts: [], sets: [], notes: [] });
     }
     const session = sessions.at(-1)!;
     if (lx.note) session.notes.push(lx.note);
@@ -42,10 +45,17 @@ export async function exerciseHistory(db: Db, exercise: Exercise, before?: strin
   return sessions;
 }
 
-/** What was done in a set, for the exercise's current modes: "135 lb × 8", "50 lb · 0:45", "25:00 · 3 mi". */
-export function setResult(s: LogSet, exercise: Exercise): string {
+/**
+ * What was done in a set, for the exercise's current modes: "135 lb × 8", "50 lb · 0:45", "25:00 · 3 mi".
+ * A bodyweight set shows its total and the added weight: "140 lb (−40) × 8", "180 lb (BW) × 10", or
+ * "BW −40 lb × 8" when no bodyweight is recorded.
+ */
+export function setResult(s: LogSet, exercise: Exercise, bodyweight: number | null = null): string {
   let head = "";
-  if (exercise.tracks.weight && s.weight !== null) head = `${formatG(s.weight)} lb`;
+  if (s.uses_bodyweight) {
+    const total = setTotal(s.weight, bodyweight);
+    head = total === null ? weightLabel(s.weight ?? 0, true) : `${formatG(total)} lb (${signedAdded(s.weight)})`;
+  } else if (exercise.tracks.weight && s.weight !== null) head = `${formatG(s.weight)} lb`;
   if (exercise.tracks.reps && s.reps !== null) head = head ? `${head} × ${s.reps}` : `${s.reps} reps`;
   const parts = [
     head,

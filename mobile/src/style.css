@@ -583,8 +583,12 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
 .day-date { font-size: 0.85rem; color: var(--muted); }
 .jump-today { text-align: center; margin: 0 0 12px; }
 .jump-today a { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
-.deload-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 10px; }
-.deload-row .hint { margin: 0; }
+.deload-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; margin: 0 0 10px; }
+.deload-row .hint { margin: 0; flex-basis: 100%; text-align: center; }
+/* The day's bodyweight (agent-notes/bodyweight.md). */
+.bw-field { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--muted); }
+.bw-field input { width: 64px; min-height: 36px; padding: 0 4px; text-align: center; }
+.bw-field input.invalid { border-color: var(--danger); }
 .deload-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .range-note { display: block; font-weight: 400; font-size: 0.85em; line-height: 1.1; color: var(--muted); }
 .field > label.switch { display: flex; margin: 8px 0 0; }
@@ -721,6 +725,17 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   text-align: center;
 }
 .log-row input.invalid { border-color: var(--danger); }
+/* A bodyweight set's weight cell: the added-weight field, then ± and the total beneath it. */
+.bw-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bw-sub { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 0.75rem; line-height: 1; }
+.bw-sign {
+  min-width: 28px; min-height: 24px; padding: 0 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--text);
+  font: inherit; font-weight: 700; cursor: pointer;
+}
+.bw-total { flex: 1; text-align: center; color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bw-total.is-target { color: var(--muted); font-weight: 400; }
+.bw-missing { display: block; width: 100%; margin: 0 0 8px; padding: 0; border: 0; background: none; text-align: left; font: inherit; font-size: 0.85rem; color: var(--accent); cursor: pointer; }
 .log-row.done input[type="text"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
 .log-row.done .set-num { color: var(--accent); }
 .check {

@@ -3,7 +3,8 @@ import { type Db, get, type Row, utcNow } from "../db/types";
 import { NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
 import {
-  cleanName, formatG, MUSCLE_ROLES, type MuscleRole, parseDuration, parseLogValue, parseReps, pyTruthy, setTargetLabel, ValidationError,
+  cleanName, MUSCLE_ROLES, type MuscleRole, parseDuration, parseLogValue, parseReps, pyTruthy, setTargetLabel, ValidationError,
+  weightLabel,
 } from "./text";
 
 export interface WorkoutSet {
@@ -42,20 +43,21 @@ export function groupBlocks<T extends { superset_group: number | null }>(slots: 
   return blocks;
 }
 
-export const setLabel = (s: WorkoutSet) =>
-  setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, s.weight, s.duration_seconds, s.distance);
+export const setLabel = (s: WorkoutSet, bodyweight = false) =>
+  setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, s.weight, s.duration_seconds, s.distance, bodyweight);
 
 /** e.g. "3 × 8–12 @ 135 lb", "4 sets: 6–8, 6–8, 6–8, AMRAP @ 135 lb", "1 × 25:00 · 3 mi", or "2 sets". */
 export function slotSummary(slot: WorkoutSlot): string {
   const n = slot.sets.length;
-  let labels = slot.sets.map(setLabel);
+  const bodyweight = slot.exercise.uses_bodyweight;
+  let labels = slot.sets.map((s) => setLabel(s, bodyweight));
   if (!labels.some(Boolean)) return n === 1 ? `${n} set` : `${n} sets`;
   if (new Set(labels).size === 1) return `${n} × ${labels[0]}`;
   // Sets differ; if they all share a weight, say it once at the end.
   const weights = new Set(slot.sets.map((s) => s.weight));
   let suffix = "";
   if (weights.size === 1 && !weights.has(null)) {
-    suffix = ` @ ${formatG([...weights][0]!)} lb`;
+    suffix = ` @ ${weightLabel([...weights][0]!, bodyweight)}`;
     labels = slot.sets.map((s) => setTargetLabel(s.reps_min, s.reps_max, s.is_amrap, null, s.duration_seconds, s.distance));
   }
   return `${n} sets: ` + labels.map((l) => l || "—").join(", ") + suffix;

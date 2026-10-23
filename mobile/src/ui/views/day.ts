@@ -3,6 +3,7 @@
 // timer. Ported from templates/day.html, static/day.js and static/rest_timer.js.
 import { html, render, svg } from "lit-html";
 import { isDeload, repRange, setDeload } from "../../logic/autoregulation";
+import { bodyweightOn, listBodyweights, setBodyweight, setTotal, signedAdded } from "../../logic/bodyweight";
 import * as day from "../../logic/day";
 import { type LogEntry, type LogSet } from "../../logic/day";
 import * as dw from "../../logic/dayWorkouts";
@@ -59,6 +60,9 @@ async function dayView(ctx: Ctx, date: string) {
   const entries = await day.dayEntries(db, date);
   const dayWorkouts = await dw.listDayWorkouts(db, date);
   const deload = await isDeload(db, date);
+  const bodyweights = await listBodyweights(db);
+  const dayBodyweight = bodyweights.find((b) => b.date === date)?.weight ?? null;
+  const appliedBodyweight = bodyweightOn(bodyweights, date);
   const blocks = groupBlocks(entries);
   const restAfter = day.restAfterSets(blocks);
   const [title, subtitle] = dayTitle(date, today);
@@ -98,7 +102,8 @@ async function dayView(ctx: Ctx, date: string) {
   });
 
   const setRow = (lx: LogEntry, s: LogSet, n: number) => html`
-    <div class="log-row${s.completed_at ? " done" : ""}" data-set=${s.id} data-rest=${restAfter.has(s.id) ? "1" : "0"}>
+    <div class="log-row${s.completed_at ? " done" : ""}" data-set=${s.id} data-rest=${restAfter.has(s.id) ? "1" : "0"}
+         data-bw-set=${s.uses_bodyweight ? "1" : "0"}>
       <span class="set-num">${n}</span>
       ${lx.exercise.modes.map((m) => {
         const f = FIELDS[m];
@@ -115,9 +120,15 @@ async function dayView(ctx: Ctx, date: string) {
           value = formatNumber(s[f.field] as number | null);
           target = formatNumber(m === "weight" ? s.target_weight : s.target_distance);
         }
-        return html`<input type="text" inputmode=${f.inputmode} autocomplete="off" data-field=${f.field} .value=${value}
+        const input = html`<input type="text" inputmode=${f.inputmode} autocomplete="off" data-field=${f.field} .value=${value}
           placeholder=${target || (m === "time" ? "m:ss" : "–")}
-          aria-label="Set ${n} ${f.label}${target ? `, target ${target}` : ""}">`;
+          aria-label="Set ${n} ${s.uses_bodyweight && m === "weight" ? "added weight" : f.label}${target ? `, target ${target}` : ""}">`;
+        if (!(s.uses_bodyweight && m === "weight")) return input;
+        // A bodyweight set's field is the added weight (− for assistance); its total shows beneath,
+        // from the placeholder while the field is blank (agent-notes/bodyweight.md).
+        return html`<div class="bw-cell">${input}<span class="bw-sub">
+          <button type="button" class="bw-sign" data-sign aria-label="Set ${n}: switch between added weight and assistance">±</button>
+          <span class="bw-total" data-bw-total></span></span></div>`;
       })}
       <button type="button" class="check" aria-pressed=${s.completed_at ? "true" : "false"} aria-label="Set ${n} completed">&#10003;</button>
     </div>`;
@@ -184,9 +195,12 @@ async function dayView(ctx: Ctx, date: string) {
           ${lx.exercise.note ? html`<span class="note exercise-note"><span class="note-kind">Every time</span>${lx.exercise.note}</span>` : ""}
           ${lx.note ? html`<span class="note session-note"><span class="note-kind">This session</span>${lx.note}</span>` : ""}
         </button>` : ""}
-      <div class="log-grid" style="--cols: ${lx.exercise.modes.length}">
+      ${lx.bodyweight === null && lx.sets.some((s) => s.uses_bodyweight) ? html`
+        <button type="button" class="bw-missing hint" data-focus-bw data-drag-ok>${HELP.day.bodyweightMissing}</button>` : ""}
+      <div class="log-grid" style="--cols: ${lx.exercise.modes.length}" data-bodyweight=${lx.bodyweight ?? ""}>
         <div class="log-row log-labels" aria-hidden="true">
-          <span>Set</span>${lx.exercise.modes.map((m) => html`<span>${FIELDS[m].label}${m === "reps" ? repRangeNote(lx) : ""}</span>`)}<span>Done</span>
+          <span>Set</span>${lx.exercise.modes.map((m) => html`<span>${m === "weight" && lx.sets.some((s) => s.uses_bodyweight)
+            ? "± lb" : FIELDS[m].label}${m === "reps" ? repRangeNote(lx) : ""}</span>`)}<span>Done</span>
         </div>
         ${lx.sets.map((s, i) => setRow(lx, s, i + 1))}
       </div>
@@ -254,7 +268,15 @@ async function dayView(ctx: Ctx, date: string) {
         ${isToday ? "" : html`<p class="jump-today"><a href="#/day">Jump to today</a></p>`}
         <div class="deload-row">
           <button type="button" class="button subtle small deload-btn" id="deload" aria-pressed=${deload ? "true" : "false"}>Deload day</button>
+          <label class="bw-field">
+            <span>Bodyweight</span>
+            <input type="text" id="bodyweight" inputmode="decimal" autocomplete="off" .value=${formatNumber(dayBodyweight)}
+                   placeholder=${appliedBodyweight ? formatNumber(appliedBodyweight.weight) : "–"} aria-label="Bodyweight in lb">
+            <span>lb</span>
+          </label>
           ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
+          ${dayBodyweight === null && appliedBodyweight
+            ? html`<span class="hint">${HELP.day.bodyweightFrom(historyDate(appliedBodyweight.date, today))}</span>` : ""}
         </div>
         ${blocks.length ? html`
           <p class="hint reorder-hint">${HELP.day.swipe}${blocks.length > 1
@@ -269,7 +291,9 @@ async function dayView(ctx: Ctx, date: string) {
             <a class="button subtle block" href=${href("/workouts/new", { day: date, next: `#/day/${date}` })}>Build workout from day</a>
             <button type="button" class="button danger small clear-day" data-confirm-delete="clear-day"
                     data-title="Clear ${isToday ? "today" : "this day"}?"
-                    data-detail="Removes all ${nExercises} exercise${nExercises === 1 ? "" : "s"} and their sets, including anything you’ve logged${deload ? ", and the deload mark" : ""}. This can’t be undone.">Clear day</button>` : ""}
+                    data-detail="Removes all ${nExercises} exercise${nExercises === 1 ? "" : "s"} and their sets, including anything you’ve logged${
+                      [deload ? "the deload mark" : "", dayBodyweight !== null ? "the bodyweight" : ""].filter(Boolean).map((x) => `, and ${x}`).join("")
+                    }. This can’t be undone.">Clear day</button>` : ""}
         </div>
       </div>
 
@@ -532,9 +556,11 @@ function mountDay(
       if (Number.isNaN(sec)) throw new Error("Time should look like 1:30 (or type 130).");
       return sec;
     }
-    if (!raw) return null;
+    const signed = input.dataset.field === "weight" && input.closest<HTMLElement>("[data-set]")?.dataset.bwSet === "1";
+    if (!raw || (signed && raw === "-")) return null; // a lone "−" from the ± button with nothing typed after it
     const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) throw new Error("Please enter a positive number.");
+    if (!Number.isFinite(n)) throw new Error("Please enter a number.");
+    if (n < 0 && !signed) throw new Error("Please enter a positive number.");
     return n;
   }
   function showField(input: HTMLInputElement, value: number | null) {
@@ -547,6 +573,7 @@ function mountDay(
       if (document.activeElement !== input) showField(input, (data as any)[input.dataset.field!]);
       input.classList.remove("invalid");
     }
+    showTotal(row);
     row.classList.toggle("done", data.completed);
     row.querySelector(".check")!.setAttribute("aria-pressed", String(data.completed));
     const card = row.closest<HTMLElement>(".log-card")!;
@@ -641,6 +668,72 @@ function mountDay(
         toast((err as Error).message);
       }
     }
+  });
+
+  // ---------- bodyweight sets (agent-notes/bodyweight.md) ----------
+  // The total under a bodyweight set's field: the day's bodyweight + the added weight typed, or the
+  // target's while the field is blank (shown dimmer). "BW +10" when no bodyweight is recorded.
+  function showTotal(row: HTMLElement) {
+    const out = row.querySelector<HTMLElement>("[data-bw-total]");
+    if (!out) return;
+    const input = row.querySelector<HTMLInputElement>('input[data-field="weight"]')!;
+    const typed = input.value.trim();
+    const n = Number(typed === "-" ? "" : typed);
+    const added = typed && typed !== "-" ? (Number.isFinite(n) ? n : null) : (input.placeholder === "–" ? 0 : Number(input.placeholder));
+    const raw = row.closest<HTMLElement>("[data-bodyweight]")!.dataset.bodyweight;
+    const total = setTotal(added, raw ? Number(raw) : null);
+    out.textContent = added === null ? "" : total === null ? (added ? `BW ${signedAdded(added)}` : "BW") : `= ${formatNumber(total)}`;
+    out.classList.toggle("is-target", !typed || typed === "-");
+  }
+  for (const row of dayEl.querySelectorAll<HTMLElement>('[data-bw-set="1"]')) showTotal(row);
+  // After the autofill listener, so mirrored fields update too.
+  on(dayEl, "input", (e: Event) => {
+    const input = (e.target as Element).closest<HTMLInputElement>('input[data-field="weight"]');
+    if (!input) return;
+    for (const row of input.closest("[data-lx]")!.querySelectorAll<HTMLElement>('[data-bw-set="1"]')) showTotal(row);
+  });
+  on(dayEl, "change", (e: Event) => {
+    const input = (e.target as Element).closest<HTMLInputElement>('input[data-field="weight"]');
+    if (input) for (const row of input.closest("[data-lx]")!.querySelectorAll<HTMLElement>('[data-bw-set="1"]')) showTotal(row);
+  });
+  // ±: flips the typed number's sign (saved like typing it). With nothing typed it starts the field
+  // with "-", since a phone's number pad may have no minus key. The field keeps focus, so a value
+  // being typed is flipped before it's saved and quick fill copies the flipped one.
+  on(dayEl, "mousedown", (e: Event) => {
+    if ((e.target as Element).closest("[data-sign]")) e.preventDefault();
+  });
+  on(dayEl, "click", (e: Event) => {
+    const btn = (e.target as Element).closest<HTMLButtonElement>("[data-sign]");
+    if (!btn) return;
+    const input = btn.closest(".bw-cell")!.querySelector<HTMLInputElement>("input")!;
+    const raw = input.value.trim();
+    if (!raw || raw === "-") {
+      input.value = raw ? "" : "-";
+      input.focus();
+      showTotal(btn.closest<HTMLElement>("[data-set]")!);
+      return;
+    }
+    input.value = raw.startsWith("-") ? raw.slice(1) : `-${raw}`;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  // The day's bodyweight: saved on change (blank removes it), then totals and volume redraw.
+  on(dayEl, "change", async (e: Event) => {
+    const input = (e.target as Element).closest<HTMLInputElement>("#bodyweight");
+    if (!input) return;
+    try {
+      await setBodyweight(db, o.date, input.value);
+      await refresh();
+    } catch (err) {
+      input.classList.add("invalid");
+      toast((err as Error).message);
+    }
+  });
+  on(dayEl, "click", (e: Event) => {
+    if (!(e.target as Element).closest("[data-focus-bw]")) return;
+    const input = dayEl.querySelector<HTMLInputElement>("#bodyweight")!;
+    input.scrollIntoView({ block: "center", behavior: "smooth" });
+    input.focus();
   });
 
   on(dayEl, "click", async (e: Event) => {

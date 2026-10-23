@@ -2,6 +2,7 @@
 // Flask database at Alembic head 0005 column-for-column (so backups transfer one-to-one),
 // plus what a fresh schema allows: ON DELETE CASCADE / SET NULL instead of Python-side
 // cascades, and >= 0 checks on the target columns. Never edit a shipped migration; append.
+import { markDefaultBodyweightExercises } from "../logic/bodyweight";
 import { groupLogWorkouts } from "../logic/dayWorkouts";
 import type { Db } from "./types";
 
@@ -155,6 +156,44 @@ export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
   `
   ALTER TABLE exercise ADD COLUMN weight_step FLOAT CHECK (weight_step IS NULL OR weight_step > 0);
   `,
+  // 6: bodyweight exercises (user, 2026-10-23; agent-notes/bodyweight.md). Not in Flask. A marked
+  // exercise logs added weight, negative for assistance, so log_set is rebuilt without the
+  // weight >= 0 checks; each set records whether it counts bodyweight; one bodyweight per day.
+  async (db) => {
+    await db.exec(`
+      ALTER TABLE exercise ADD COLUMN uses_bodyweight BOOLEAN NOT NULL DEFAULT 0;
+      CREATE TABLE bodyweight (
+        date DATE PRIMARY KEY,
+        weight FLOAT NOT NULL CHECK (weight > 0)
+      );
+      CREATE TABLE log_set_new (
+        id INTEGER PRIMARY KEY,
+        log_exercise_id INTEGER NOT NULL REFERENCES log_exercise (id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        target_reps_min INTEGER,
+        target_reps_max INTEGER,
+        target_amrap BOOLEAN NOT NULL DEFAULT 0,
+        target_weight FLOAT,
+        target_duration_seconds INTEGER CHECK (target_duration_seconds IS NULL OR target_duration_seconds >= 0),
+        target_distance FLOAT CHECK (target_distance IS NULL OR target_distance >= 0),
+        weight FLOAT,
+        reps INTEGER CHECK (reps IS NULL OR reps >= 0),
+        duration_seconds INTEGER CHECK (duration_seconds IS NULL OR duration_seconds >= 0),
+        distance FLOAT CHECK (distance IS NULL OR distance >= 0),
+        completed_at DATETIME,
+        target_reps INTEGER CHECK (target_reps IS NULL OR target_reps >= 0),
+        uses_bodyweight BOOLEAN NOT NULL DEFAULT 0,
+        UNIQUE (log_exercise_id, position)
+      );
+      INSERT INTO log_set_new (id, log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_weight,
+        target_duration_seconds, target_distance, weight, reps, duration_seconds, distance, completed_at, target_reps)
+      SELECT id, log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_weight,
+        target_duration_seconds, target_distance, weight, reps, duration_seconds, distance, completed_at, target_reps FROM log_set;
+      DROP TABLE log_set;
+      ALTER TABLE log_set_new RENAME TO log_set;
+    `);
+    await markDefaultBodyweightExercises(db);
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -180,5 +219,5 @@ export async function migrate(db: Db): Promise<number> {
 export const TABLES = [
   "muscle_group", "exercise", "exercise_muscle", "workout", "workout_exercise", "workout_set",
   "routine", "routine_workout", "routine_muscle_target", "target_preset", "target_preset_value", "progress_target",
-  "log_workout", "log_exercise", "log_set", "deload_day",
+  "log_workout", "log_exercise", "log_set", "deload_day", "bodyweight",
 ] as const;
