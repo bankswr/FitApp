@@ -1194,6 +1194,9 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .settings-card { display: flex; flex-direction: column; gap: 12px; }
 .settings-card h2 { margin: 0; }
 .settings-card .hint { margin: 0; }
+.about { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; font-size: 0.9rem; }
+.about dt { color: var(--muted); }
+.about dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .timer-options { display: flex; flex-direction: column; gap: 12px; }
 .settings-card .switch + .hint { margin-top: -10px; }
 .settings-heading { margin: 24px 0 12px; }

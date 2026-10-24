@@ -1,7 +1,7 @@
 # Mobile app plan
 Decision and constraints for turning FitApp into a standalone Android/iPhone app.
 
-Last updated: 2026-10-18 (app icon from IconKitchen; schema v5; port complete on Android; iPhone web-app build done, hosting pending)
+Last updated: 2026-10-24 (version shown in Settings; app icon from IconKitchen; schema v5; port complete on Android; iPhone web-app build done, hosting pending)
 
 ## Decision (user, 2026-09-30)
 - **Everything runs on the phone.** The Python logic is ported to TypeScript, with an on-device SQLite database, wrapped with **Capacitor**. The existing HTML/CSS/JS is reused as far as possible.
@@ -42,7 +42,7 @@ Last updated: 2026-10-18 (app icon from IconKitchen; schema v5; port complete on
   - `android/app/build.gradle` reads that file, or the one named by `FITAPP_KEYSTORE_PROPERTIES`. Without it, release builds are unsigned.
   - **Every update must be signed with this same key**, or phones refuse to install it over the old app.
   - Build with `./gradlew assembleRelease`, which produces `app/build/outputs/apk/release/app-release.apk`. Check it with `apksigner verify --print-certs`.
-  - **Every build the user asks for bumps the version first (user rule, 2026-10-01):** `versionCode` + 1 and the `versionName` patch + 1 (0.1.1 → 0.1.2) in `app/build.gradle`. Builds made only for testing don't bump it.
+  - **Every build the user asks for bumps the version first (user rule, 2026-10-01):** `versionCode` + 1 and the `versionName` patch + 1 (0.1.1 → 0.1.2) in `app/build.gradle`. Builds made only for testing don't bump it. Settings shows this version and the database's schema (`PRAGMA user_version`) at the bottom (user request, 2026-10-24): `vite.config.ts` reads `versionName` / `versionCode` from `build.gradle` into `__APP_VERSION__` / `__APP_BUILD__`, so the web build shows the same version and nothing else needs bumping.
   - Release builds can't be debugged over CDP or read with `run-as`, so test them with adb taps and screenshots.
   - `assembleRelease` needs `ANDROID_HOME=$HOME/Android/Sdk` as well as `JAVA_HOME` (there's no `local.properties`), or it fails with "SDK location not found".
   - Release deliverables go in `mobile/build/release-<version>/` (gitignored): `fitapp-<version>.apk` and `fitapp-web-<version>.zip`, the iPhone web app (`dist/` zipped; unzip it into any folder of a static HTTPS host).

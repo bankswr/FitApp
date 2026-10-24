@@ -19,6 +19,7 @@ const METHOD_NAME: Record<RatingMethod, string> = { faces: "Faces", stars: "Star
 
 route(/^\/settings$/, async (ctx) => {
   const backup = await backupSettings(ctx);
+  const schema = Number((await ctx.db.all("PRAGMA user_version"))[0].user_version);
   return {
     title: "Settings",
     section: "settings",
@@ -75,7 +76,13 @@ route(/^\/settings$/, async (ctx) => {
         </div>
       </section>
       <h2 class="settings-heading">Backup</h2>
-      ${backup.content}`,
+      ${backup.content}
+      <section class="card settings-card about-card" aria-label="About">
+        <dl class="about">
+          <dt>App version</dt><dd>${__APP_VERSION__} (build ${__APP_BUILD__})</dd>
+          <dt>Database schema</dt><dd>${schema}</dd>
+        </dl>
+      </section>`,
     mount(root: HTMLElement, signal: AbortSignal) {
       mountRestTimerSettings(root, signal);
       backup.mount(root, signal);

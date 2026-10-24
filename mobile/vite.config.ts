@@ -26,10 +26,16 @@ function serviceWorker(): Plugin {
   };
 }
 
+// The app version shown in Settings, from the one place it's bumped for each build (agent-notes/mobile-app-plan.md).
+const gradle = readFileSync("android/app/build.gradle", "utf8");
+const appVersion = gradle.match(/versionName "([^"]+)"/)?.[1] ?? "unknown";
+const appBuild = gradle.match(/versionCode (\d+)/)?.[1] ?? "?";
+
 // The built app is plain static files in dist/, loaded from the phone by Capacitor
 // (or from any static folder in a browser), so asset paths must be relative.
 export default defineConfig({
   base: "./",
   server: { host: "127.0.0.1", port: 5173 },
   plugins: [serviceWorker()],
+  define: { __APP_VERSION__: JSON.stringify(appVersion), __APP_BUILD__: JSON.stringify(appBuild) },
 });
