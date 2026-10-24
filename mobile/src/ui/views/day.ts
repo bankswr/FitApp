@@ -818,15 +818,20 @@ function mountDay(
       } else if (!data.completed && !card.classList.contains("is-collapsed")) {
         setEntryCollapsed(Number(card.dataset.lx), false); // unchecked before it folded
       }
-      if (data.completed && !dayEl.querySelector("[data-set]:not(.done)")) o.onDayFinished();
-      else if (data.completed && row.dataset.rest === "1") o.onSetCompleted();
-      // The first ✓ of a workout today starts it (and finishes the one in progress).
+      // The first ✓ of a workout today starts it (and finishes the one in progress); its last ✓
+      // finishes it (agent-notes/day-workouts.md).
       const w = workoutOf(row);
-      if (w !== null) {
-        const lxId = Number(row.closest<HTMLElement>("[data-lx]")!.dataset.lx);
-        if (data.completed && o.isToday && await dw.noteCheckOff(db, lxId, restSeconds())) return await refresh();
-        void updateStats(w);
+      let started = false;
+      let finished = false;
+      if (w !== null && data.completed && o.isToday) {
+        started = await dw.noteCheckOff(db, Number(row.closest<HTMLElement>("[data-lx]")!.dataset.lx), restSeconds());
+        finished = await dw.finishIfDone(db, w);
       }
+      // No rest needed after a workout's (or the day's) last set (user).
+      if (data.completed && (finished || !dayEl.querySelector("[data-set]:not(.done)"))) o.onDayFinished();
+      else if (data.completed && row.dataset.rest === "1") o.onSetCompleted();
+      if (started || finished) return await refresh();
+      if (w !== null) void updateStats(w);
     } catch (err) {
       toast((err as Error).message);
     } finally {

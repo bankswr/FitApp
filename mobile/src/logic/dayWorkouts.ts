@@ -124,6 +124,23 @@ export async function noteCheckOff(db: Db, entryId: number, restSeconds: number)
 }
 
 /**
+ * A set was checked off today (user requirement, 2026-10-24): when it was the workout's last set not
+ * checked off (warmups included), a workout in progress finishes at that ✓, with no rest added.
+ * A zero-length span is unknown, so both times go back to NULL. Returns true if it finished.
+ */
+export async function finishIfDone(db: Db, logWorkoutId: number): Promise<boolean> {
+  const w = await getDayWorkout(db, logWorkoutId);
+  if (!inProgress(w) || w.last_check === null) return false;
+  const open = (await get(db,
+    `SELECT COUNT(*) AS n FROM log_set ls JOIN log_exercise lx ON lx.id = ls.log_exercise_id
+     WHERE lx.log_workout_id = ? AND ls.completed_at IS NULL`, [logWorkoutId]))!.n as number;
+  if (open) return false;
+  if (parseUtc(w.last_check) <= parseUtc(w.started_at!)) await setTimes(db, w.id, null, null);
+  else await setTimes(db, w.id, w.started_at, w.last_check);
+  return true;
+}
+
+/**
  * Hand-edited times (any day). `end` without `start` isn't allowed and the span must be positive;
  * a start with no end (in progress) only on today. Both blank clears them.
  */

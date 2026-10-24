@@ -4,7 +4,7 @@ import { migrate, MIGRATIONS } from "../src/db/schema";
 import { autoregulatedTargets } from "../src/logic/autoregulation";
 import { addExercises, clearDay, deleteLogEntry, loadWorkout, setSupersetWithNext } from "../src/logic/day";
 import {
-  arrangeDay, deleteDayWorkout, finishDayWorkout, finishStaleWorkouts, getDayWorkout, noteCheckOff, resumeDayWorkout,
+  arrangeDay, deleteDayWorkout, finishDayWorkout, finishIfDone, finishStaleWorkouts, getDayWorkout, noteCheckOff, resumeDayWorkout,
   setDayWorkoutTimes, startDayWorkout, wrapIntoDayWorkout,
 } from "../src/logic/dayWorkouts";
 import { getWorkout } from "../src/logic/workouts";
@@ -192,6 +192,30 @@ describe("workout times, delete, dragging and wrapping", () => {
     expect(await times(db)).toEqual([["10:00", null]]);
     await finishStaleWorkouts(db, T("11:01"), 0);
     expect(await times(db)).toEqual([[null, null]]);
+  });
+
+  it("finishes at the last set's ✓, warmups included; not before, not once finished, and a zero span has no times", async () => {
+    const db = await day2(1);
+    await db.run("UPDATE log_set SET is_warmup = 1 WHERE id = 1");
+    for (const [id, hhmm] of [[2, "10:00"], [3, "10:10"], [4, "10:20"]] as const) {
+      await check(db, id, hhmm);
+      await noteCheckOff(db, id < 3 ? 1 : 2, 90);
+      expect(await finishIfDone(db, 1)).toBe(false); // the warmup is still open
+    }
+    await check(db, 1, "10:30");
+    expect(await finishIfDone(db, 1)).toBe(true);
+    expect(await times(db)).toEqual([["10:00", "10:30"]]);
+    expect(await finishIfDone(db, 1)).toBe(false); // already finished
+    await resumeDayWorkout(db, 1, 90);
+    expect(await finishIfDone(db, 1)).toBe(true); // resumed with every set done: the last ✓ again
+    expect(await times(db)).toEqual([["10:00", "10:30"]]);
+
+    const one = await day2(1);
+    await one.run("DELETE FROM log_set WHERE id != 1");
+    await check(one, 1, "10:00");
+    await noteCheckOff(one, 1, 90);
+    expect(await finishIfDone(one, 1)).toBe(true);
+    expect(await times(one)).toEqual([[null, null]]);
   });
 
   it("validates hand-edited times", async () => {

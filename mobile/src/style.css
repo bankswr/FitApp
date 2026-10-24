@@ -755,8 +755,12 @@ input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px
   text-align: center;
 }
 .log-row input.invalid { border-color: var(--danger); }
-/* A bodyweight set's weight cell: the added-weight field, then ± and the total beneath it. */
+/* A bodyweight set's weight cell: the added-weight field, then ± and the total on their own line
+   beneath it. Its row lines up at the top, so every field and ✓ stays level with the weight field
+   (user, 2026-10-24); the number and ✓ keep the field's height. */
 .bw-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.log-row:has(.bw-cell) { align-items: start; }
+.log-row:has(.bw-cell) .set-num { display: flex; align-items: center; justify-content: center; min-height: 44px; }
 .bw-sub { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 0.75rem; line-height: 1; }
 .bw-sign {
   min-width: 28px; min-height: 24px; padding: 0 6px;
