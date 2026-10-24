@@ -200,6 +200,12 @@ export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
   ALTER TABLE workout_set ADD COLUMN is_warmup BOOLEAN NOT NULL DEFAULT 0;
   ALTER TABLE log_set ADD COLUMN is_warmup BOOLEAN NOT NULL DEFAULT 0;
   `,
+  // 8: workout ratings (user, 2026-10-24; agent-notes/ratings.md). Not in Flask. Recovery going into
+  // a loaded workout and effort during it, each 0 (worst / easiest) to 1 (best / hardest), NULL unrated.
+  `
+  ALTER TABLE log_workout ADD COLUMN recovery FLOAT CHECK (recovery IS NULL OR (recovery >= 0 AND recovery <= 1));
+  ALTER TABLE log_workout ADD COLUMN effort FLOAT CHECK (effort IS NULL OR (effort >= 0 AND effort <= 1));
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

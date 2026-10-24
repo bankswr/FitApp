@@ -10,7 +10,7 @@ import { exerciseHistory } from "../../logic/history";
 import { formatNumber, MUSCLE_ROLES, NOTE_MAX_LENGTH, TRACKING_MODES } from "../../logic/text";
 import { type Ctx, currentPath, flash, navigate, refresh, returnTo, route, stash, takeStash } from "../app";
 import { exerciseFilter, filterControls, type FilterState } from "../exerciseFilter";
-import { weightStepDefault } from "../prefs";
+import { featureOn, weightStepDefault } from "../prefs";
 import { mountWeightStep, weightStepField } from "../weightStep";
 import { historyList } from "./history";
 import { HELP } from "../help";
@@ -58,7 +58,7 @@ route(/^\/exercises$/, async (ctx) => {
             <li class="card-wrap" data-i=${i}>
               <a class="card card-link" href="#/exercises/${ex.id}">
                 <h2>${ex.name}</h2>
-                <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight
+                <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight && featureOn("bodyweight")
                   ? html`<span class="badge">Bodyweight</span>` : ""}</div>
                 <p class="muscles"><strong>Primary:</strong> ${ex.primary.join(", ")}</p>
                 ${ex.ancillary.length ? html`<p class="muscles"><strong>Ancillary:</strong> ${ex.ancillary.join(", ")}</p>` : ""}
@@ -100,7 +100,7 @@ route(/^\/exercises\/(\d+)$/, async (ctx) => {
         <a class="button subtle" href="#/exercises/${ex.id}/edit">Edit</a>
       </header>
       <section class="card exercise-info">
-        <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight
+        <div class="badges">${ex.modes.map((m) => html`<span class="badge">${cap(m)}</span>`)}${ex.uses_bodyweight && featureOn("bodyweight")
                   ? html`<span class="badge">Bodyweight</span>` : ""}</div>
         <p class="muscles"><strong>Primary:</strong> ${ex.primary.join(", ")}</p>
         ${ex.ancillary.length ? html`<p class="muscles"><strong>Ancillary:</strong> ${ex.ancillary.join(", ")}</p>` : ""}
@@ -189,7 +189,8 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
               </label>`)}
           </div>
         </fieldset>
-        <div class="field">
+        <!-- Hidden, not removed, while Bodyweight is switched off in Settings, so saving keeps the exercise's flag. -->
+        <div class="field" ?hidden=${!featureOn("bodyweight")}>
           <label class="switch">
             <input type="checkbox" name="uses_bodyweight" id="uses_bodyweight" ?checked=${form.uses_bodyweight}>
             <span>Bodyweight exercise</span>

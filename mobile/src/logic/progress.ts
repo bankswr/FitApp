@@ -32,10 +32,12 @@ export interface ProgressData {
  */
 export type ProgressFilter = { kind: "routine" | "workout"; id: number } | null;
 
+const filterWorkouts = (filter: NonNullable<ProgressFilter>) =>
+  filter.kind === "workout" ? "?" : "SELECT workout_id FROM routine_workout WHERE routine_id = ?";
+
 function filterSql(filter: ProgressFilter): [string, unknown[]] {
   if (!filter) return ["", []];
-  const workouts = filter.kind === "workout" ? "?" : "SELECT workout_id FROM routine_workout WHERE routine_id = ?";
-  return [` AND lx.log_workout_id IN (SELECT id FROM log_workout WHERE workout_id IN (${workouts}))`, [filter.id]];
+  return [` AND lx.log_workout_id IN (SELECT id FROM log_workout WHERE workout_id IN (${filterWorkouts(filter)}))`, [filter.id]];
 }
 
 /** The filter from ?routine= / ?workout=, or null (everything). */
@@ -92,6 +94,36 @@ export async function progressData(db: Db, start: string, end: string, filter: P
     completedSets: [...setsByExercise.values()].reduce((a, b) => a + b, 0),
   };
 }
+
+export interface RatingDay {
+  date: string;
+  /** Each workout's rating that day, in load order; the line goes through their average. */
+  recovery: number[];
+  effort: number[];
+}
+
+/**
+ * Workout ratings over the range (user requirement, 2026-10-24; agent-notes/ratings.md): only days
+ * with at least one rating, under the same routine / workout filter as the rest of Progress.
+ */
+export async function progressRatings(db: Db, start: string, end: string, filter: ProgressFilter = null): Promise<RatingDay[]> {
+  const only = filter ? ` AND workout_id IN (${filterWorkouts(filter)})` : "";
+  const rows = await db.all(
+    `SELECT date, recovery, effort FROM log_workout
+     WHERE date >= ? AND date <= ? AND (recovery IS NOT NULL OR effort IS NOT NULL)${only} ORDER BY date, id`,
+    [start, end, ...(filter ? [filter.id] : [])],
+  );
+  const days: RatingDay[] = [];
+  for (const r of rows) {
+    if (days.at(-1)?.date !== r.date) days.push({ date: r.date as string, recovery: [], effort: [] });
+    const d = days.at(-1)!;
+    if (r.recovery !== null) d.recovery.push(r.recovery as number);
+    if (r.effort !== null) d.effort.push(r.effort as number);
+  }
+  return days;
+}
+
+export const average = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
 
 /** The quick range buttons: [label, start] ending today. */
 export function rangePresets(today: string): [string, string][] {

@@ -1,7 +1,7 @@
 # Bodyweight exercises
 How exercises marked as bodyweight log added weight / assistance on top of a per-day bodyweight, and how that feeds totals, volume and autoregulation. Mobile app only (schema 6, `mobile/src/logic/bodyweight.ts`), not in Flask.
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Rules (user requirement, 2026-10-23)
 - **Exercise setting:** "Bodyweight exercise" switch on the exercise form (`exercise.uses_bodyweight`). It implies tracking weight: checking it checks Weight; unchecking Weight unchecks it; `saveExercise` adds weight to the modes if missing. Lists show a "Bodyweight" badge.
@@ -14,6 +14,8 @@ Last updated: 2026-10-23
 - **± button:** phone number pads (iOS especially) may have no minus key. It flips the typed value's sign, or starts an empty field with "-". `mousedown` is prevented so the field keeps focus and quick fill copies the flipped value to the other sets.
 - **History:** "140 lb (−40) × 8", "180 lb (BW) × 10", or "BW −40 lb × 8" when no bodyweight is recorded. Workout summaries label planned weights "BW +10 lb".
 - **Default exercises marked (user-approved list):** Pullup, Neutral Pullup, Chinup, Dips, Hyperextension (`DEFAULT_BODYWEIGHT_EXERCISES`). Machines that load the machine (Hack Squat, Leg Press, Calf Press, Glute Press) are not. Seeded marked on fresh installs; migration 6 and importing a pre-6 backup mark exact-name matches (and turn on their weight tracking).
+
+- **Settings switch (2026-10-24):** Bodyweight can be hidden per device; everything above still applies to the data (see `feature-switches.md`).
 
 ## Storage
 - Migration 6 rebuilds `log_set` (SQLite can't drop CHECKs) to remove the `weight >= 0` / `target_weight >= 0` checks and add `uses_bodyweight`. `workout_set.weight` keeps its check: the builder doesn't plan weight, so planned weights are never negative.

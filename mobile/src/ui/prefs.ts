@@ -1,4 +1,5 @@
 import { type Autoregulate, WEIGHT_STEP, WEIGHT_STEP_MAX } from "../logic/autoregulation";
+import { RATING_METHODS, type RatingMethod } from "../logic/ratings";
 
 // Per-device preferences kept in localStorage (like the rest timer's). Reads fall back to the
 // default when storage is unavailable.
@@ -87,4 +88,49 @@ export function setWeightStepDefault(step: number) {
 /** What the day view passes to its loaders: off, or on with this device's default weight step. */
 export function autoregulation(): Autoregulate {
   return autoregulateOn() && { weightStep: weightStepDefault() };
+}
+
+// Feature switches (user requirement, 2026-10-24; agent-notes/feature-switches.md): each hides a
+// feature's controls on this device. All on by default. Hiding never changes the data or how it's
+// used: stored ratings, deload marks and bodyweight sets keep counting.
+export type Feature = "ratings" | "restTimer" | "deload" | "bodyweight";
+const FEATURE_KEYS: Record<Feature, string> = {
+  ratings: "fitapp.ratings",
+  restTimer: "fitapp.restTimerShown",
+  deload: "fitapp.deload",
+  bodyweight: "fitapp.bodyweight",
+};
+
+export function featureOn(feature: Feature): boolean {
+  try {
+    return localStorage.getItem(FEATURE_KEYS[feature]) !== "off";
+  } catch {
+    return true;
+  }
+}
+export function setFeature(feature: Feature, on: boolean) {
+  try {
+    localStorage.setItem(FEATURE_KEYS[feature], on ? "on" : "off");
+  } catch {
+    /* storage unavailable: the setting lasts until the app reloads */
+  }
+}
+
+const RATING_METHOD = "fitapp.ratingMethod";
+
+/** How workout ratings are entered: faces (the default), stars or a slider. All store 0–1. */
+export function ratingMethod(): RatingMethod {
+  try {
+    const m = localStorage.getItem(RATING_METHOD);
+    return (RATING_METHODS as readonly string[]).includes(m ?? "") ? (m as RatingMethod) : "faces";
+  } catch {
+    return "faces";
+  }
+}
+export function setRatingMethod(method: RatingMethod) {
+  try {
+    localStorage.setItem(RATING_METHOD, method);
+  } catch {
+    /* storage unavailable: the setting lasts until the app reloads */
+  }
 }

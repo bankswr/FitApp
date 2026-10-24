@@ -1,7 +1,7 @@
 # Autoregulation
 How autoregulation sets rep and weight targets from the previous session, and how deload days fit in. Mobile app only (`mobile/src/logic/autoregulation.ts`), not in Flask.
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Rules (user requirement, 2026-10-04)
 - **One switch in Settings (user requirement, 2026-10-10):** **Autoregulation** on the Settings screen, per device (`fitapp.autoregulate` in localStorage via `ui/prefs.ts`, off by default). The day view passes it to `loadRoutine` / `loadWorkout` / `addExercises` as an `autoregulate` argument (default false, so the logic stays Flask-parity when off). It replaced the per-routine checkbox: `routine.autoregulate` is still stored, imported and exported, and kept through edits by a hidden field in the routine editor, but nothing reads it.
@@ -39,4 +39,4 @@ Last updated: 2026-10-23
 - The reps placeholder shows `target_reps` when set (`target_label`), and the card's Reps label shows each distinct range of its autoregulated sets beneath it, in set order (e.g. `8–12 · AMRAP`). "+ Set" copies `target_reps` like the other targets.
 
 ## Deload days (user requirement)
-- The **Deload day** toggle under the day header writes/removes a `deload_day` row (`setDeload`). Autoregulation skips those dates as references and uses the previous non-deload session instead. It doesn't change the routine's rotation (`routineNextIndex`) or anything else. **Clear day also removes the deload mark** (user, 2026-10-04).
+- The **Deload day** toggle under the day header writes/removes a `deload_day` row (`setDeload`). Autoregulation skips those dates as references and uses the previous non-deload session instead. It doesn't change the routine's rotation (`routineNextIndex`) or anything else. **Clear day also removes the deload mark** (user, 2026-10-04). The button can be hidden in Settings; marks still count (`feature-switches.md`).

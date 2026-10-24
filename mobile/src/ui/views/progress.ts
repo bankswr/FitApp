@@ -3,13 +3,16 @@
 import { html } from "lit-html";
 import { listPresets, type Preset, savePreset } from "../../logic/presets";
 import {
-  parseProgressFilter, progressData, progressRange, progressTargets, rangePresets, replaceProgressTargets, saveProgressTarget,
+  parseProgressFilter, progressData, progressRange, progressRatings, progressTargets, rangePresets, replaceProgressTargets, saveProgressTarget,
 } from "../../logic/progress";
 import { listRoutines } from "../../logic/routines";
 import { listWorkouts } from "../../logic/workouts";
 import { formatNumber, formatVolume, historyDate, truncate1 } from "../../logic/text";
 import { currentPath, flash, href, navigate, refresh, route } from "../app";
 import { mountVolumeChart } from "../volumeChart";
+import { mountRatingsChart, ratingSummary, SERIES } from "../ratingsChart";
+import { RATING_LABEL } from "../rating";
+import { featureOn } from "../prefs";
 import { HELP } from "../help";
 
 route(/^\/progress$/, async (ctx) => {
@@ -27,6 +30,8 @@ route(/^\/progress$/, async (ctx) => {
   if (filter && !(filter.kind === "routine" ? routines : workouts).some((x) => x.id === filter!.id)) filter = null;
   const only = { routine: filter?.kind === "routine" ? String(filter.id) : null, workout: filter?.kind === "workout" ? String(filter.id) : null };
   const p = await progressData(ctx.db, start, end, filter);
+  const showRatings = featureOn("ratings"); // hidden when switched off in Settings; the data stays
+  const ratingDays = showRatings ? await progressRatings(ctx.db, start, end, filter) : [];
   const targets = await progressTargets(ctx.db);
   const presets = await listPresets(ctx.db);
   const here = `#${currentPath()}`;
@@ -86,6 +91,31 @@ route(/^\/progress$/, async (ctx) => {
             </table>
           </details>` : html`<p class="empty small">No completed weight × reps sets in this range.</p>`}
       </section>
+      ${showRatings ? html`
+        <section class="card chart-card">
+          <h2>Workout ratings</h2>
+          <p class="hint">${HELP.progress.ratings}</p>
+          <ul class="chart-legend">
+            ${(["recovery", "effort"] as const).map((k) => html`
+              <li><i style="background: ${SERIES[k]}"></i>${RATING_LABEL[k]}</li>`)}
+          </ul>
+          <div class="chart" id="ratings-chart" tabindex="0" role="img"
+               aria-label="Line chart of recovery and effort ratings from ${label(start)} to ${label(end)}. Use the left and right arrow keys to read each rated day, or open the table below.">
+            <div class="chart-tooltip" hidden><strong></strong><span></span></div>
+          </div>
+          ${ratingDays.length ? html`
+            <details class="table-view">
+              <summary>Show as table</summary>
+              <table>
+                <thead><tr><th scope="col">Day</th><th scope="col">Recovery</th><th scope="col">Effort</th></tr></thead>
+                <tbody>
+                  ${ratingDays.map((d) => html`
+                    <tr><td><a href="#/day/${d.date}">${label(d.date)}</a></td>
+                      <td>${ratingSummary(d.recovery)}</td><td>${ratingSummary(d.effort)}</td></tr>`)}
+                </tbody>
+              </table>
+            </details>` : html`<p class="empty small">No rated workouts in this range.</p>`}
+        </section>` : ""}
       <section class="card">
         <div class="section-head">
           <h2>Sets per muscle group</h2>
@@ -137,6 +167,8 @@ route(/^\/progress$/, async (ctx) => {
     mount(root: HTMLElement, signal: AbortSignal) {
       const chart = root.querySelector<HTMLElement>("#volume-chart");
       if (chart) mountVolumeChart(chart, p.days, signal);
+      const ratingsChart = root.querySelector<HTMLElement>("#ratings-chart");
+      if (ratingsChart) mountRatingsChart(ratingsChart, start, end, ratingDays, signal);
       mountTargets(root, signal, ctx.db, presets);
       const form = root.querySelector<HTMLFormElement>("#range-form")!;
       form.addEventListener("submit", (e) => {

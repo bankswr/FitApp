@@ -5,18 +5,18 @@
 const SVG = "http://www.w3.org/2000/svg";
 const BAR = "#16a34a"; // validated against the card surface (dataviz validate_palette, dark mode)
 const BAR_ACTIVE = "#22c55e"; // the hovered bar lifts a step lighter
-const PLOT_H = 180;
-const AXIS_H = 46; // x-axis label band (angled dates), included in the container height
-const LABEL_ANGLE = -75; // steep enough that neighbouring days stay readable on a month range
-const MIN_LABEL_GAP = 9; // px between angled labels; narrower day columns switch to weekly labels
-const LEFT = 44; // y-axis label gutter
-const TOP = 8;
+export const PLOT_H = 180;
+export const AXIS_H = 46; // x-axis label band (angled dates), included in the container height
+export const LABEL_ANGLE = -75; // steep enough that neighbouring days stay readable on a month range
+export const MIN_LABEL_GAP = 9; // px between angled labels; narrower day columns switch to weekly labels
+export const LEFT = 44; // y-axis label gutter
+export const TOP = 8;
 
 // Cut off at one decimal, thousands-separated (matches formatVolume).
 const fmt = (v: number) => (Math.floor(v * 10 + 1e-9) / 10).toLocaleString("en-US", { maximumFractionDigits: 1 });
 const parse = (iso: string) => new Date(`${iso}T00:00:00`);
-const shortDate = (iso: string) => parse(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-const longDate = (iso: string) => parse(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+export const shortDate = (iso: string) => parse(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+export const longDate = (iso: string) => parse(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
 // Round axis: 1 / 2 / 2.5 / 5 × 10^n steps, about four gridlines.
 function niceStep(max: number): number {
@@ -25,7 +25,7 @@ function niceStep(max: number): number {
   return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)!;
 }
 
-function el(name: string, attrs: Record<string, string | number>, parent: Element): SVGElement {
+export function el(name: string, attrs: Record<string, string | number>, parent: Element): SVGElement {
   const node = document.createElementNS(SVG, name);
   for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
   parent.appendChild(node);

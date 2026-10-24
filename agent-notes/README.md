@@ -28,3 +28,5 @@ Anything here is committed to git so future sessions can build on it.
 - [autoregulation.md](autoregulation.md) — routine autoregulation rules (rep/weight targets from the last session), weight step (per exercise + Settings default), reference lookup, deload days, schemas v3/v5 (mobile only)
 - [bodyweight.md](bodyweight.md) — bodyweight exercises: signed added weight/assistance, per-day bodyweight, totals in volume/history, autoregulation without a 0 floor, per-set flag keeping old volume, default marked exercises (schema 6, mobile only)
 - [warmups.md](warmups.md) — warmup sets: first in an exercise, excluded from volume/set counts/autoregulation/rest timer, weight targets in the builder, day +/− Warmup carries the count back to the workout (schema 7, mobile only)
+- [ratings.md](ratings.md) — workout ratings: recovery/effort per loaded workout, 0–1 (faces, stars, slider), entry on the block header and times sheet, Progress chart (schema 8, mobile only)
+- [feature-switches.md](feature-switches.md) — Settings switches that hide the rest timer, deload, bodyweight and ratings; hiding never changes calculations

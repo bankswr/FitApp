@@ -1,7 +1,7 @@
 // The day view: logging sets, the "+ Add" sheet (routines / workouts / exercises), history
 // and notes sheets, long-press reordering, the calendar, swipe navigation and the rest
 // timer. Ported from templates/day.html, static/day.js and static/rest_timer.js.
-import { html, render, svg } from "lit-html";
+import { html, nothing, render, svg } from "lit-html";
 import { isDeload, repRange, setDeload } from "../../logic/autoregulation";
 import { bodyweightOn, listBodyweights, setBodyweight, setTotal, signedAdded } from "../../logic/bodyweight";
 import * as day from "../../logic/day";
@@ -22,9 +22,11 @@ import { longPressReorder } from "../dragReorder";
 import { formatTime, parseTime } from "../time";
 import { historyList } from "./history";
 import { tapHaptic } from "../native";
-import { autoregulation, collapsedEntries, quickFillOn, setEntryCollapsed, weightStepDefault } from "../prefs";
+import { autoregulation, collapsedEntries, featureOn, quickFillOn, ratingMethod, setEntryCollapsed, weightStepDefault } from "../prefs";
+import { setRating } from "../../logic/ratings";
+import { mountRatings, paintRating, ratingControl } from "../rating";
 import { takeCreatedExercises } from "./exercises";
-import { mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
+import { hiddenRestTimer, mountRestTimer, restSeconds, restTimerBar } from "./restTimer";
 import { HELP } from "../help";
 
 // How each tracking mode appears as a column.
@@ -63,6 +65,8 @@ async function dayView(ctx: Ctx, date: string) {
   const bodyweights = await listBodyweights(db);
   const dayBodyweight = bodyweights.find((b) => b.date === date)?.weight ?? null;
   const appliedBodyweight = bodyweightOn(bodyweights, date);
+  // Feature switches (agent-notes/feature-switches.md) only hide controls; the data counts as before.
+  const shown = { timer: featureOn("restTimer"), deload: featureOn("deload"), bodyweight: featureOn("bodyweight") };
   const blocks = groupBlocks(entries);
   const restAfter = day.restAfterSets(blocks);
   const [title, subtitle] = dayTitle(date, today);
@@ -127,7 +131,7 @@ async function dayView(ctx: Ctx, date: string) {
         const input = html`<input type="text" inputmode=${f.inputmode} autocomplete="off" data-field=${f.field} .value=${value}
           placeholder=${target || (m === "time" ? "m:ss" : "–")}
           aria-label="${label} ${s.uses_bodyweight && m === "weight" ? "added weight" : f.label}${target ? `, target ${target}` : ""}">`;
-        if (!(s.uses_bodyweight && m === "weight")) return input;
+        if (!(s.uses_bodyweight && m === "weight" && shown.bodyweight)) return input;
         // A bodyweight set's field is the added weight (− for assistance); its total shows beneath,
         // from the placeholder while the field is blank (agent-notes/bodyweight.md).
         return html`<div class="bw-cell">${input}<span class="bw-sub">
@@ -200,7 +204,7 @@ async function dayView(ctx: Ctx, date: string) {
           ${lx.exercise.note ? html`<span class="note exercise-note"><span class="note-kind">Every time</span>${lx.exercise.note}</span>` : ""}
           ${lx.note ? html`<span class="note session-note"><span class="note-kind">This session</span>${lx.note}</span>` : ""}
         </button>` : ""}
-      ${lx.bodyweight === null && lx.sets.some((s) => s.uses_bodyweight) ? html`
+      ${shown.bodyweight && lx.bodyweight === null && lx.sets.some((s) => s.uses_bodyweight) ? html`
         <button type="button" class="bw-missing hint" data-focus-bw data-drag-ok>${HELP.day.bodyweightMissing}</button>` : ""}
       <div class="log-grid" style="--cols: ${lx.exercise.modes.length}" data-bodyweight=${lx.bodyweight ?? ""}>
         <div class="log-row log-labels" aria-hidden="true">
@@ -252,6 +256,14 @@ async function dayView(ctx: Ctx, date: string) {
     return html`<button type="button" class="button subtle small" data-wb-act=${act} data-wb=${w.id}
       aria-label="${label} ${w.name}">${label}</button>`;
   };
+  // Ratings (agent-notes/ratings.md): on today, recovery until the workout starts and effort once
+  // it's finished; any day, both in the times sheet.
+  const ratings = featureOn("ratings");
+  const wbRating = (w: DayWorkout) => {
+    if (!ratings || !isToday || dw.inProgress(w)) return "";
+    const kind = w.started_at === null ? "recovery" : "effort";
+    return html`<div class="wb-rate">${ratingControl(kind, w[kind], ratingMethod(), w.id)}</div>`;
+  };
   const workoutBlock = (w: DayWorkout, inner: LogEntry[][]) => html`
     <section class="wblock" data-wblock=${w.id} aria-label="Workout ${w.name}">
       <div class="wb-head">
@@ -263,6 +275,7 @@ async function dayView(ctx: Ctx, date: string) {
                 data-confirm-delete="lw:${w.id}" data-name=${w.name}
                 data-detail="Removes its sets that aren’t checked off. Exercises with checked-off sets stay on this day, outside any workout.">&times;</button>
       </div>
+      ${wbRating(w)}
       ${inner.map(blockHtml)}
       <div class="wb-end" aria-hidden="true"></div>
     </section>`;
@@ -270,7 +283,7 @@ async function dayView(ctx: Ctx, date: string) {
   return {
     title,
     section: "day" as const,
-    screenClass: "has-timer",
+    screenClass: shown.timer ? "has-timer" : undefined,
     content: html`
       <div class="day" id="day" data-date=${date}>
         <header class="day-header">
@@ -282,18 +295,21 @@ async function dayView(ctx: Ctx, date: string) {
           <a class="icon-btn day-nav" href="#/day/${next}" aria-label="Next day">&rsaquo;</a>
         </header>
         ${isToday ? "" : html`<p class="jump-today"><a href="#/day">Jump to today</a></p>`}
+        ${shown.deload || shown.bodyweight ? html`
         <div class="deload-row">
-          <button type="button" class="button subtle small deload-btn" id="deload" aria-pressed=${deload ? "true" : "false"}>Deload day</button>
-          <label class="bw-field">
-            <span>Bodyweight</span>
-            <input type="text" id="bodyweight" inputmode="decimal" autocomplete="off" .value=${formatNumber(dayBodyweight)}
-                   placeholder=${appliedBodyweight ? formatNumber(appliedBodyweight.weight) : "–"} aria-label="Bodyweight in lb">
-            <span>lb</span>
-          </label>
-          ${deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
-          ${dayBodyweight === null && appliedBodyweight
+          ${shown.deload ? html`
+            <button type="button" class="button subtle small deload-btn" id="deload" aria-pressed=${deload ? "true" : "false"}>Deload day</button>` : ""}
+          ${shown.bodyweight ? html`
+            <label class="bw-field">
+              <span>Bodyweight</span>
+              <input type="text" id="bodyweight" inputmode="decimal" autocomplete="off" .value=${formatNumber(dayBodyweight)}
+                     placeholder=${appliedBodyweight ? formatNumber(appliedBodyweight.weight) : "–"} aria-label="Bodyweight in lb">
+              <span>lb</span>
+            </label>` : ""}
+          ${shown.deload && deload ? html`<span class="hint">Autoregulation skips this day.</span>` : ""}
+          ${shown.bodyweight && dayBodyweight === null && appliedBodyweight
             ? html`<span class="hint">${HELP.day.bodyweightFrom(historyDate(appliedBodyweight.date, today))}</span>` : ""}
-        </div>
+        </div>` : ""}
         ${blocks.length ? html`
           <p class="hint reorder-hint">${HELP.day.swipe}${blocks.length > 1
             ? html`<br>${HELP.day.drag}` : ""}</p>
@@ -400,6 +416,7 @@ async function dayView(ctx: Ctx, date: string) {
           <h2 id="times-sheet-title"></h2>
           <button type="button" class="button subtle" data-close>Cancel</button>
         </div>
+        <div class="times-ratings" id="times-ratings"></div>
         <form class="form" id="times-form" novalidate>
           <div class="times-row">
             <div class="field"><label for="wt-start">Start</label><input type="time" id="wt-start"></div>
@@ -435,10 +452,10 @@ async function dayView(ctx: Ctx, date: string) {
         </div>
       </dialog>
 
-      ${restTimerBar()}
+      ${shown.timer ? restTimerBar() : ""}
       <div class="toast" id="toast" role="status" hidden></div>`,
     mount(root: HTMLElement, signal: AbortSignal) {
-      const timer = mountRestTimer(root, signal);
+      const timer = shown.timer ? mountRestTimer(root, signal) : hiddenRestTimer();
       mountDay(root, signal, ctx, {
         date, prev, next, options, summaries, isToday, dayWorkouts, onSetCompleted: timer.onSetCompleted, onDayFinished: timer.onDayFinished,
       });
@@ -537,6 +554,7 @@ function mountDay(
   const timesForm = root.querySelector<HTMLFormElement>("#times-form")!;
   const startIn = root.querySelector<HTMLInputElement>("#wt-start")!;
   const endIn = root.querySelector<HTMLInputElement>("#wt-end")!;
+  const timesRatings = root.querySelector<HTMLElement>("#times-ratings")!;
   let timesFor: number | null = null;
   const hhmm = (s: string | null) => (s ? dw.parseUtc(s).toTimeString().slice(0, 5) : "");
   on(dayEl, "click", (e: Event) => {
@@ -547,8 +565,27 @@ function mountDay(
     root.querySelector("#times-sheet-title")!.textContent = w.name;
     startIn.value = hhmm(w.started_at);
     endIn.value = hhmm(w.ended_at);
+    render(featureOn("ratings") ? html`
+      ${ratingControl("recovery", w.recovery, ratingMethod(), w.id)}
+      ${ratingControl("effort", w.effort, ratingMethod(), w.id)}
+      <p class="hint">${HELP.day.ratings}</p>` : nothing, timesRatings);
     timesSheet.showModal();
   });
+  // A rating saves as soon as it's picked, in the header or the sheet (agent-notes/ratings.md).
+  const saveRating = async (id: number, kind: "recovery" | "effort", value: number | null) => {
+    try {
+      await setRating(db, id, kind, value);
+      const w = workouts.get(id);
+      if (w) w[kind] = value;
+      // The same rating may also be showing in the header (or the sheet): keep both in step.
+      root.querySelectorAll<HTMLElement>(`[data-rating="${kind}"][data-lw="${id}"]`).forEach((g) => paintRating(g, value));
+    } catch (err) {
+      toast((err as Error).message);
+      throw err;
+    }
+  };
+  mountRatings(dayEl, signal, saveRating);
+  mountRatings(timesRatings, signal, saveRating);
   on(timesForm, "submit", async (e: Event) => {
     e.preventDefault();
     const start = startIn.value ? new Date(`${o.date}T${startIn.value}`) : null;

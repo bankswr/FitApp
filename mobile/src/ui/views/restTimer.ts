@@ -6,6 +6,7 @@ import { html } from "lit-html";
 import { formatDuration } from "../../logic/text";
 import { alarmHaptic, clearRestTimer, nativeChime, prepareRestAlarms, showRestTimer, watchRestTimerStop } from "../native";
 import { HELP } from "../help";
+import { featureOn, setFeature } from "../prefs";
 
 const KEY = "fitapp.restTimer";
 const DEFAULTS = { duration: 90, auto: true, endsAt: null as number | null };
@@ -35,6 +36,12 @@ export const restSeconds = () => loadState().duration;
 export const restTimerSettings = () => html`
   <section class="card settings-card" id="timer-settings">
     <h2>Rest timer</h2>
+    <label class="switch">
+      <input type="checkbox" id="timer-shown" .checked=${featureOn("restTimer")}>
+      <span>Show the rest timer on the day screen</span>
+    </label>
+    <p class="hint">${HELP.settings.restTimerShown}</p>
+    <div class="timer-options" id="timer-options" ?hidden=${!featureOn("restTimer")}>
     <div class="stepper">
       <button type="button" class="icon-btn" data-step="-15" aria-label="15 seconds less">&minus;15s</button>
       <output id="timer-duration" aria-live="polite">1:30</output>
@@ -48,6 +55,7 @@ export const restTimerSettings = () => html`
       <span>Start automatically when a set is completed</span>
     </label>
     <p class="hint">${HELP.settings.restTimerAuto}</p>
+    </div>
   </section>`;
 
 /** Each change re-reads the stored state, so a countdown that is already running is kept. */
@@ -74,7 +82,31 @@ export function mountRestTimerSettings(root: HTMLElement, signal: AbortSignal) {
     else if (preset) update((st) => (st.duration = Number(preset.dataset.preset)));
   }, { signal });
   autoBox.addEventListener("change", () => update((st) => (st.auto = autoBox.checked)), { signal });
+  const shownBox = card.querySelector<HTMLInputElement>("#timer-shown")!;
+  shownBox.addEventListener("change", () => {
+    setFeature("restTimer", shownBox.checked);
+    card.querySelector<HTMLElement>("#timer-options")!.hidden = !shownBox.checked;
+    if (!shownBox.checked) stopCountdown();
+  }, { signal });
   render();
+}
+
+/** Ends a running countdown and its notification, without the alarm. */
+function stopCountdown() {
+  const state = loadState();
+  if (state.endsAt === null) return;
+  state.endsAt = null;
+  saveState(state);
+  void clearRestTimer();
+}
+
+/**
+ * The day view's timer while it's switched off in Settings: nothing to show, nothing starts. Its
+ * length still finishes forgotten workouts (restSeconds).
+ */
+export function hiddenRestTimer(): ReturnType<typeof mountRestTimer> {
+  stopCountdown();
+  return { onSetCompleted() {}, onDayFinished() {} };
 }
 
 const stopwatchIcon = html`<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" fill="none" stroke="currentColor"

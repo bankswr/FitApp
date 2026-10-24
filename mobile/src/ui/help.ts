@@ -22,6 +22,7 @@ export const HELP = {
     workoutTimes: "Blank means unknown and is left out of stats. A finish earlier than the start is the next day.",
     bodyweightFrom: (when: string) => `From ${when}. Enter today's if it changed.`,
     bodyweightMissing: "Enter your bodyweight at the top of the day to see totals.",
+    ratings: "Ratings save as soon as you pick them. Tap the selected face or star again to clear it.",
   },
 
   routineEditor: {
@@ -66,10 +67,13 @@ export const HELP = {
       ancillary ${MUSCLE_SET_WEIGHTS.ancillary}. Per week = total × 7 ÷ ${nDays} days. Enter a weekly minimum for
       each group (or load a preset). Bars are scaled to the group with the most sets; the tick marks the minimum,
       and a bar is red until it reaches it.`,
+    ratings: "Each dot is one workout's rating; the line is the daily average. Days without a rating are skipped.",
     presetPicker: "Loading a preset replaces every group’s weekly minimum. Groups it leaves out get 0.",
   },
 
   settings: {
+    restTimerShown: `Turn off to hide the timer button; it then never starts on its own. Its length still counts
+      when a forgotten workout is finished automatically (the last ✓ plus the rest).`,
     restTimerAuto: "In a superset, it starts only after the last exercise of each round. It never starts after the day's last set.",
     quickFill: `The first value you type in a column fills that column on the exercise's other sets: weight and reps
       on the day view, every target in the workout builder. Turn it off to fill each set yourself.`,
@@ -79,6 +83,16 @@ export const HELP = {
       own goes by its own last session. Deload days are skipped. The dial in a card's swipe tray does this for one
       exercise any time.`,
     weightStep: "How much the weight goes up or down. An exercise can set its own on its edit page.",
+    deload: `A deload day is a lighter day to recover. Marking one (the button under the day's date) tells
+      autoregulation to skip it and base targets on the session before. Turning this off only hides the button:
+      days already marked are still skipped.`,
+    bodyweight: `Exercises like pullups and dips can be marked as bodyweight exercises on their edit page. You then
+      log the weight you add (or, as a negative number, the assistance), and each set counts your bodyweight for
+      that day plus that number. Turning this off hides the bodyweight field, the ± button and totals, and the
+      exercise setting; exercises already marked keep counting your bodyweight, and their weight column stays "± lb".`,
+    ratings: `Rate how recovered you feel going into each workout and how hard you pushed. Today's workout asks for
+      recovery before you start and effort once you finish; tap a workout's name to rate it on any day. Progress
+      charts both. Every method saves on the same scale, so you can switch any time.`,
     exportBackup: (contents: string) => `Saves all your data (${contents}) to a file. Keep a recent copy somewhere
       safe, off this phone: there's no cloud copy, so it's what protects you if the phone is lost or reset.`,
     importBackup: html`<strong>Replaces everything</strong> in the app with the backup's data. You'll see what the

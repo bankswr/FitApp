@@ -48,7 +48,7 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
   // Schema 5 added exercise.weight_step (nullable), so older backups need nothing. Schema 6 added
   // bodyweight and uses_bodyweight flags (default 0): an older backup gets the default bodyweight
   // exercises marked, as the migration does; its logged sets keep their volume. Schema 7 added
-  // is_warmup flags (default 0), so older backups need nothing.
+  // is_warmup flags (default 0), and schema 8 nullable log_workout ratings, so older backups need nothing.
   const tables = backup.tables;
   if (!tables || typeof tables !== "object") throw new BackupError("The backup has no data.");
   const unknown = Object.keys(tables).filter((t) => !(TABLES as readonly string[]).includes(t));

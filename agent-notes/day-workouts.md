@@ -1,7 +1,7 @@
 # Workouts on the day screen
 Each loaded workout on a day is its own unit (a `log_workout` row) with its own times, so volume and duration per workout can be tracked. Mobile app only (`mobile/`), not in Flask.
 
-Last updated: 2026-10-14
+Last updated: 2026-10-24
 
 ## Status
 Agreed with the user on 2026-10-14; steps 1–5 built and shipped the same day in v0.1.6:
@@ -27,6 +27,8 @@ Agreed with the user on 2026-10-14; steps 1–5 built and shipped the same day i
 - **Superset button:** a workout's last card has no ↓ link, and `setSupersetWithNext` refuses a link across a workout edge.
 - Clear day removes the day's workouts too. Deload days and calendar counts stay day-level.
 - Routine next-workout and autoregulation will use sessions instead of `(date, workout_id)`; when the same workout was done twice on a day, the later one is the reference.
+
+**Ratings (schema 8):** recovery and effort per `log_workout`, see `ratings.md`.
 
 ## Storage (schema v4)
 - **`log_workout`**: `id`, `date`, `workout_id` (nullable, `ON DELETE SET NULL`), `name` (a copy of the workout's name at load time, so renaming or deleting the template doesn't change history), `started_at`, `ended_at` (UTC like `completed_at`, nullable).

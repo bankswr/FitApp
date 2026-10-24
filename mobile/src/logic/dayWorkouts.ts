@@ -17,6 +17,9 @@ export interface DayWorkout {
   name: string;
   started_at: string | null;
   ended_at: string | null;
+  /** Ratings, 0–1 or NULL (schema 8, logic/ratings.ts). */
+  recovery: number | null;
+  effort: number | null;
   /** Weight × reps over completed working sets with both (bodyweight sets at their total), as on the Progress screen. */
   volume: number;
   last_check: string | null;
