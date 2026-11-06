@@ -1,7 +1,7 @@
 # Mobile app plan
 Decision and constraints for turning FitApp into a standalone Android/iPhone app.
 
-Last updated: 2026-10-24 (version shown in Settings; app icon from IconKitchen; schema v5; port complete on Android; iPhone web-app build done, hosting pending)
+Last updated: 2026-10-25 (iPhone web app host: Netlify Drop; version shown in Settings; app icon from IconKitchen; port complete on Android)
 
 ## Decision (user, 2026-09-30)
 - **Everything runs on the phone.** The Python logic is ported to TypeScript, with an on-device SQLite database, wrapped with **Capacitor**. The existing HTML/CSS/JS is reused as far as possible.
@@ -15,12 +15,16 @@ Last updated: 2026-10-24 (version shown in Settings; app icon from IconKitchen; 
 
 ## Distribution
 - **Android:** a signed APK built on Linux and shared directly (e.g. attached to a GitHub release). Friends allow \"install unknown apps\" once. The rest-timer alarm fires while the phone is locked (an app-side plugin; see the rest timer in `data-model.md`).
-- **iPhone (no Mac, no store):** the same offline build as an installable PWA. It's opened once in Safari from a static URL, then Share → Add to Home Screen, and from then on runs offline. Only the app's files are hosted (e.g. GitHub Pages); user data never leaves the phone. Limits:
+- **iPhone (no Mac, no store):** the same offline build as an installable PWA. It's opened once in Safari from a static URL, then Share → Add to Home Screen, and from then on runs offline. Only the app's files are hosted (on Netlify, see below); user data never leaves the phone. Limits:
   - No rest-timer alarm while locked (web apps can't schedule local notifications).
   - iOS may clear site storage in rare cases, so an on-device backup file matters.
 - **Chosen for iPhone (user, 2026-09-30): the installable PWA, not a native iOS build.** A native iOS build later would need a cloud Mac build and a $99/yr Apple account (TestFlight or Ad Hoc); that's out of scope unless the user asks.
 - The user has an **iPad** to use as the Apple test device. Its Safari uses the same WebKit as iPhone, so it can test install, offline use, storage and touch (including the untested long-press drag). Safari can be debugged from Linux over USB with `ios-webkit-debug-proxy`/`libimobiledevice` (not installed yet; only if needed). The iPad can't build the app (no Xcode on iPadOS).
-- The PWA needs a stable HTTPS static address, because iOS storage belongs to the exact origin. Moving it later means users start empty unless they Export/Import. Still open: whether the GitHub repo is public (GitHub Pages needs a public repo on the free plan) or another static host is used. (The repo moved from Codeberg to GitHub on 2026-10-05; Codeberg bans AI-generated code.).
+- The PWA needs a stable HTTPS static address, because iOS storage belongs to the exact origin. Moving it later means users start empty unless they Export/Import.
+- **Host chosen (user, 2026-10-25): Netlify Drop** (`app.netlify.com/drop`). Drag the `latest-build/iphone/` folder onto it to get a `*.netlify.app` HTTPS address. No git or build setup, and the GitHub repo can stay private.
+  - A drop without an account is deleted after about an hour, so the site must be claimed with a free Netlify account to keep its address.
+  - Updates: drag the new build onto **that site's Deploys page**, never a fresh `/drop` (a new address means iOS treats it as a different app with empty data).
+  - Not deployed yet as of 2026-10-25; once it is, record the site address here. (The repo moved from Codeberg to GitHub on 2026-10-05; Codeberg bans AI-generated code.).
 
 ## Backups
 - There's no cloud. Add **export to file / import from file** (a JSON backup the user saves wherever they like), plus a one-time import of the existing Flask `instance/fitapp.db` so current history carries over.
@@ -70,7 +74,7 @@ Last updated: 2026-10-24 (version shown in Settings; app icon from IconKitchen; 
 - **Backups:** Settings → Backup (`backupSettings` in `views/backup.ts`; a Library screen until 2026-10-10). Export goes to the share sheet; Import uses Android's document picker (tested on the signed release APK). Import asks for confirmation first, showing the file's contents, what it replaces, and the export date. The shared confirm panel accepts `data-confirm-label`.
 - **Pending:**
   - Attach the signed APK to a GitHub release for friends.
-  - iPhone PWA: a stable HTTPS host (the build side is done, see below). The user must decide on a public repo for GitHub Pages versus another host.
+  - iPhone PWA: deploy to Netlify (host chosen, see above) and record the address.
   - Test the PWA on the user's iPad: install, offline launch, share-sheet export, long-press drag, safe-area padding.
   - A notification icon (Capacitor default for now, per the user). The app icon is done (below).
   - Retire Flask once the user has moved their data (`scripts/export_for_mobile.py`, then Import).
