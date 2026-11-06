@@ -2,7 +2,7 @@
 // autosave, notes, reordering, and calendar counts. Ported from app.py.
 import { type Db, get, type Row, utcNow } from "../db/types";
 import {
-  type Autoregulate, autoregulatedTargets, defaultStepOf, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
+  type Autoregulate, defaultStepOf, sessionTargets, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
 } from "./autoregulation";
 import { bodyweightOn, listBodyweights } from "./bodyweight";
 import { joinDayWorkout, pruneLogWorkouts, workoutForNewExercises } from "./dayWorkouts";
@@ -162,7 +162,7 @@ async function nextPositionAndGroup(db: Db, date: string): Promise<[number, numb
 
 /**
  * Append a workout's exercises to a day, snapshotting its targets so later plan edits never change
- * history. `adjusted` (autoregulation) replaces the rep and weight targets of matching sets.
+ * history. `adjusted` (autoregulation, warmup carry-over) replaces the rep and weight targets of matching sets.
  */
 export async function addWorkoutToDay(db: Db, date: string, workout: Workout, adjusted?: (SetTargets | null)[][]): Promise<void> {
   await db.transaction(async () => {
@@ -197,14 +197,14 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
 }
 
 // `autoregulate` is the Settings switch (user requirement, 2026-10-10; per device, so the UI
-// passes it in, with Settings' default weight step). Off: plan targets as saved, like Flask.
+// passes it in, with Settings' default weight step). Off: working sets keep the plan's targets, like
+// Flask. Warmups carry over from last time either way (agent-notes/warmups.md).
 
 /** Loads a workout. Autoregulated from that workout's latest earlier non-deload session, from any source. */
 export async function loadWorkout(db: Db, date: string, workoutId: number, autoregulate: Autoregulate = false): Promise<void> {
   checkDate(date);
   const workout = await getWorkout(db, workoutId);
-  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots, defaultStepOf(autoregulate)) : undefined;
-  await addWorkoutToDay(db, date, workout, adjusted);
+  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate));
 }
 
 /** Loads the routine's workout at `index` (default: the next one in its rotation). Returns the workout name. */
@@ -217,8 +217,7 @@ export async function loadRoutine(db: Db, date: string, routineId: number, index
     throw new ConflictError("That routine changed. Reload and try again.");
   }
   const workout = await getWorkout(db, routine.workout_ids[i]);
-  const adjusted = autoregulate ? await autoregulatedTargets(db, date, workout.id, workout.slots, defaultStepOf(autoregulate)) : undefined;
-  await addWorkoutToDay(db, date, workout, adjusted);
+  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate));
   return workout.name;
 }
 

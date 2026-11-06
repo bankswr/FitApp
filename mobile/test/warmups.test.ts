@@ -86,7 +86,8 @@ describe("warmups on a day", () => {
     for (const [n, s] of first.sets.entries()) await updateSet(c.db, s.id, { reps: n < 2 ? 5 : 12, weight: n < 2 ? 45 : 135, completed: true });
     await loadWorkout(c.db, "2026-10-03", c.workoutId, true);
     const t = (await entry(c, "2026-10-03", c.bench)).sets.map((s) => [s.target_reps, s.target_weight]);
-    expect(t).toEqual([[null, 45], [null, 95], [8, 140], [8, 140]]);
+    // Warmups carry last time's numbers over unchanged; working sets are autoregulated.
+    expect(t).toEqual([[5, 45], [5, 45], [8, 140], [8, 140]]);
     // The AR button, with a different warmup count than last time: working sets still line up.
     await addExercises(c.db, "2026-10-05", [c.bench]);
     const adhoc = await entry(c, "2026-10-05", c.bench);
@@ -94,6 +95,29 @@ describe("warmups on a day", () => {
     await autoregulateEntry(c.db, adhoc.id, 5);
     expect((await entry(c, "2026-10-05", c.bench)).sets.map((s) => [s.is_warmup, s.target_reps, s.target_weight]))
       .toEqual([[true, null, null], [false, 8, 140], [false, 8, 140], [false, null, null]]);
+  });
+
+  it("carries warmup numbers over from last session as targets, with autoregulation off too", async () => {
+    const c = await setup();
+    await loadWorkout(c.db, "2026-10-01", c.workoutId);
+    const [w1, w2] = (await entry(c, "2026-10-01", c.bench)).sets;
+    await updateSet(c.db, w1.id, { reps: 6, weight: 65, completed: true });
+    await updateSet(c.db, w2.id, { reps: 2, weight: 115 }); // typed, not checked off: doesn't count
+    await loadWorkout(c.db, "2026-10-02", c.workoutId);
+    const sets = (await entry(c, "2026-10-02", c.bench)).sets;
+    expect(sets.map((s) => [s.target_reps, s.target_weight, s.target_label])).toEqual([
+      [6, 65, "6"], [null, 95, "3"], [null, 135, "8–12"], [null, 135, "8–12"],
+    ]);
+    // Values are left blank: targets only.
+    expect(sets.map((s) => [s.reps, s.weight])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
+    // Not done again: the previous targets carry forward.
+    await loadWorkout(c.db, "2026-10-03", c.workoutId);
+    expect((await entry(c, "2026-10-03", c.bench)).sets[0]).toMatchObject({ target_reps: 6, target_weight: 65 });
+    // A warmup with no counterpart last time keeps the plan's targets.
+    await changeWarmups(c.db, (await entry(c, "2026-10-03", c.bench)).id, true);
+    await loadWorkout(c.db, "2026-10-04", c.workoutId);
+    expect((await entry(c, "2026-10-04", c.bench)).sets.filter((s) => s.is_warmup).map((s) => [s.target_reps, s.target_weight]))
+      .toEqual([[6, 65], [null, 95], [null, 95]]);
   });
 
   it("carries a warmup added or removed on the day over to the workout", async () => {

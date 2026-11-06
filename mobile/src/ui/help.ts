@@ -43,7 +43,7 @@ export const HELP = {
   workoutBuilder: {
     drag: "Long-press an exercise to drag it into a new order.",
     targets: "Targets are optional.",
-    warmups: "Warmups come first. They don't count toward volume or set totals and aren't autoregulated.",
+    warmups: "Warmups come first. They don't count toward volume or set totals and aren't autoregulated: each one's targets repeat what you did last session.",
   },
 
   exerciseForm: {

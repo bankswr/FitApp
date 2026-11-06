@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { importBackup } from "../src/db/backup";
 import { migrate, MIGRATIONS } from "../src/db/schema";
-import { autoregulatedTargets } from "../src/logic/autoregulation";
+import { sessionTargets } from "../src/logic/autoregulation";
 import { addExercises, clearDay, deleteLogEntry, loadWorkout, setSupersetWithNext } from "../src/logic/day";
 import {
   arrangeDay, deleteDayWorkout, finishDayWorkout, finishIfDone, finishStaleWorkouts, getDayWorkout, noteCheckOff, resumeDayWorkout,
@@ -286,7 +286,7 @@ describe("routine rotation and autoregulation read workouts on a day", () => {
     await loadWorkout(db, DAY, 1);
     await db.run("UPDATE log_set SET completed_at = 'x', weight = 100, reps = 6 WHERE log_exercise_id = 1");
     await db.run("UPDATE log_set SET completed_at = 'x', weight = 200, reps = 6 WHERE log_exercise_id = 2");
-    const [[targets]] = await autoregulatedTargets(db, "2026-10-02", 1, (await getWorkout(db, 1)).slots);
+    const [[targets]] = await sessionTargets(db, "2026-10-02", 1, (await getWorkout(db, 1)).slots, true);
     expect(targets?.weight).toBe(200);
   });
 });

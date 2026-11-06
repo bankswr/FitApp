@@ -1,7 +1,7 @@
 # Autoregulation
 How autoregulation sets rep and weight targets from the previous session, and how deload days fit in. Mobile app only (`mobile/src/logic/autoregulation.ts`), not in Flask.
 
-Last updated: 2026-10-24
+Last updated: 2026-11-06
 
 ## Rules (user requirement, 2026-10-04)
 - **One switch in Settings (user requirement, 2026-10-10):** **Autoregulation** on the Settings screen, per device (`fitapp.autoregulate` in localStorage via `ui/prefs.ts`, off by default). The day view passes it to `loadRoutine` / `loadWorkout` / `addExercises` as an `autoregulate` argument (default false, so the logic stays Flask-parity when off). It replaced the per-routine checkbox: `routine.autoregulate` is still stored, imported and exported, and kept through edits by a hidden field in the routine editor, but nothing reads it.
@@ -15,7 +15,7 @@ Last updated: 2026-10-24
 - **Weight step (user requirement, 2026-10-15):** `step` is the exercise's own `exercise.weight_step` if set, else the device's Settings default (`fitapp.weightStep` via `ui/prefs.ts`, 5 lb when unset). The day view passes the default in through `autoregulation()` (`Autoregulate = boolean | { weightStep }`; plain `true` means 5 lb) and to `autoregulateEntry`. Both the exercise form (shown only when the exercise tracks weight; blank = default) and Settings use one field, `ui/weightStep.ts`: typed value plus −/+ buttons that move along `WEIGHT_STEPS` [1.25, 2.5, 5, 10, 25, 45] to the nearest ladder value that way, starting from the placeholder when blank. Typed values: above 0 and up to 1000, rounded to 2 decimals. Turning weight tracking off clears the exercise's step.
 - A set not checked off, or checked with no reps, **copies the previous targets** (`target_reps`, `target_weight`). Typed-but-unchecked values don't count; the user reconfirmed this on 2026-10-04 after test days with only typed values produced blank targets.
 - **AMRAP sets (user, 2026-10-04):** reps follow the same rule with no range (`r + 1` if `r ≥ t`, else `r`; first time `t = r`), and the weight is carried over as `w`, **never adjusted**: changing it is left to the user. No step down when reps drop.
-- **Warmup sets** are never adjusted or used as a reference; sets match by position among working sets only (see `warmups.md`).
+- **Warmup sets** are never adjusted or used as a reference; sets match by position among working sets only. Warmups instead carry over unchanged from the same reference session, whether or not the switch is on (`sessionTargets`; see `warmups.md`).
 - Not adjusted (plan targets kept): exercises that don't track reps, and sets with no matching set last time (e.g. a set added to the plan).
 - Unmarked exercises with no weight (none logged or targeted, or weight not tracked): reps only, held at the range maximum instead of adding weight. The user didn't rule on this case explicitly. Exercises marked **Bodyweight** step their added weight instead, below 0 for assistance (see `bodyweight.md`).
 

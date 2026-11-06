@@ -97,24 +97,22 @@ export async function setDeload(db: Db, date: string, on: boolean): Promise<void
 export const NOT_DELOAD = "date NOT IN (SELECT date FROM deload_day)";
 
 /**
- * Targets for every set of the workout's slots when it's loaded on `date`, or null for a set that
- * keeps the plan's targets. The reference is the workout's latest earlier non-deload session (a
- * log_workout; the later one when it was done twice on a day); its exercises are matched to the slots by exercise, in order, so a
- * rearranged workout still lines up. A slot whose exercise wasn't in that session (replaced) uses
- * the exercise's own latest earlier non-deload entry. Never done before: the plan, unchanged.
+ * The previous session's entry for each of the workout's slots when it's loaded on `date` (null:
+ * nothing to go by). The reference is the workout's latest earlier non-deload session (a
+ * log_workout; the later one when it was done twice on a day); its exercises are matched to the
+ * slots by exercise, in order, so a rearranged workout still lines up. A slot whose exercise wasn't
+ * in that session (replaced) uses the exercise's own latest earlier non-deload entry. Never done
+ * before: all null. Shared by autoregulation and the warmup carry-over.
  */
-export async function autoregulatedTargets(
-  db: Db, date: string, workoutId: number, slots: WorkoutSlot[], defaultStep = WEIGHT_STEP,
-): Promise<(SetTargets | null)[][]> {
-  const planOnly = slots.map((wx) => wx.sets.map(() => null));
+export async function previousEntries(db: Db, date: string, workoutId: number, slots: WorkoutSlot[]): Promise<(number | null)[]> {
   const last = await get(db,
     `SELECT lw.id FROM log_workout lw JOIN log_exercise lx ON lx.log_workout_id = lw.id
      WHERE lw.workout_id = ? AND lw.date < ? AND lw.date NOT IN (SELECT date FROM deload_day)
      GROUP BY lw.id ORDER BY lw.date DESC, MIN(lx.position) DESC LIMIT 1`, [workoutId, date]);
-  if (!last) return planOnly;
+  if (!last) return slots.map(() => null);
   const previous = await db.all("SELECT id, exercise_id FROM log_exercise WHERE log_workout_id = ? ORDER BY position", [last.id]);
   const used = new Set<number>();
-  const result: (SetTargets | null)[][] = [];
+  const result: (number | null)[] = [];
   for (const wx of slots) {
     let entry = previous.find((p) => p.exercise_id === wx.exercise.id && !used.has(p.id));
     if (entry) used.add(entry.id);
@@ -124,16 +122,50 @@ export async function autoregulatedTargets(
         [wx.exercise.id, date],
       );
     }
-    // Working sets match by position among working sets; warmups are never adjusted or a reference.
-    const prevSets = entry
-      ? await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? AND NOT is_warmup ORDER BY position", [entry.id]) : [];
+    result.push(entry?.id ?? null);
+  }
+  return result;
+}
+
+/**
+ * A warmup's targets carried over unchanged from the same warmup last time (user requirement,
+ * 2026-11-06; agent-notes/warmups.md): what was logged when it was checked off, else last time's
+ * targets. Typed-but-unchecked values don't count, as with autoregulation. Never adjusted.
+ */
+export function carriedWarmup(prev: PreviousSet, plan: Pick<WorkoutSet, "weight">, tracksReps: boolean, tracksWeight: boolean): SetTargets {
+  const done = prev.completed_at !== null;
+  return {
+    reps: tracksReps ? ((done ? prev.reps : null) ?? prev.target_reps ?? null) : null,
+    weight: tracksWeight ? ((done ? prev.weight : null) ?? prev.target_weight ?? plan.weight) : plan.weight,
+  };
+}
+
+/**
+ * Targets for every set of the workout's slots when it's loaded on `date`, or null for a set that
+ * keeps the plan's targets. Working sets are autoregulated (only when `autoregulate`), warmups carry
+ * over unchanged (always), both from `previousEntries`. Never done before: the plan, unchanged.
+ */
+export async function sessionTargets(
+  db: Db, date: string, workoutId: number, slots: WorkoutSlot[], autoregulate: Autoregulate,
+): Promise<(SetTargets | null)[][]> {
+  const entries = await previousEntries(db, date, workoutId, slots);
+  const defaultStep = defaultStepOf(autoregulate);
+  const result: (SetTargets | null)[][] = [];
+  for (const [i, wx] of slots.entries()) {
+    const prevSets = entries[i] === null ? [] : await db.all("SELECT * FROM log_set WHERE log_exercise_id = ? ORDER BY position", [entries[i]]);
+    // Warmups match by position among warmups, working sets among working sets, so the counts can differ.
+    const prevWarmups = prevSets.filter((s) => s.is_warmup) as PreviousSet[];
+    const prevWorking = prevSets.filter((s) => !s.is_warmup) as PreviousSet[];
+    const warmups = wx.sets.filter((s) => s.is_warmup);
     const working = workingSets(wx.sets);
     result.push(wx.sets.map((ws) => {
-      const prev = prevSets[working.indexOf(ws)];
-      if (ws.is_warmup || !prev || !wx.exercise.tracks.reps) return null;
-      return nextTargets(
-        prev as PreviousSet, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep, wx.exercise.uses_bodyweight,
-      );
+      if (ws.is_warmup) {
+        const prev = prevWarmups[warmups.indexOf(ws)];
+        return prev ? carriedWarmup(prev, ws, wx.exercise.tracks.reps, wx.exercise.tracks.weight) : null;
+      }
+      const prev = prevWorking[working.indexOf(ws)];
+      if (!autoregulate || !prev || !wx.exercise.tracks.reps) return null;
+      return nextTargets(prev, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep, wx.exercise.uses_bodyweight);
     }));
   }
   return result;

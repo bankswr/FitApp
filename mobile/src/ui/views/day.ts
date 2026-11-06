@@ -672,15 +672,17 @@ function mountDay(
   // The first weight or reps value entered for an exercise is copied, as you type, into that
   // column on its later sets that are empty and not checked off, and saved with it. After that
   // the column counts as filled and every set is edited on its own. A column that already has a
-  // value anywhere (e.g. after a reload) is filled from the start.
+  // value anywhere (e.g. after a reload) is filled from the start. Warmups and working sets are
+  // separate columns: each has its own first entry (user, 2026-11-06).
   // Settings can turn it off (Quick fill, ui/prefs.ts).
   const AUTOFILL = quickFillOn() ? ["weight", "reps"] : [];
-  const filled = new Set<string>(); // `${lx}:${field}`
+  const fieldKey = (input: HTMLInputElement) => `${input.closest<HTMLElement>("[data-lx]")!.dataset.lx}:`
+    + `${input.closest<HTMLElement>("[data-set]")!.dataset.warmup}:${input.dataset.field}`;
+  const filled = new Set<string>(); // `${lx}:${warmup}:${field}`
   for (const input of dayEl.querySelectorAll<HTMLInputElement>("input[data-field]")) {
-    if (input.value) filled.add(`${input.closest<HTMLElement>("[data-lx]")!.dataset.lx}:${input.dataset.field}`);
+    if (input.value) filled.add(fieldKey(input));
   }
   let mirror: { source: HTMLInputElement; targets: HTMLInputElement[] } | null = null;
-  const fieldKey = (input: HTMLInputElement) => `${input.closest<HTMLElement>("[data-lx]")!.dataset.lx}:${input.dataset.field}`;
 
   on(dayEl, "input", (e: Event) => {
     const input = (e.target as Element).closest<HTMLInputElement>("input[data-field]");
