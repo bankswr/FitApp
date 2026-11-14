@@ -34,6 +34,7 @@ export const HELP = {
       Enter the weekly minimum for each group (or apply a preset). Bars are scaled to the group with the
       most sets; the tick marks the minimum, and a bar is red until it reaches it.`,
     presetPicker: "Fills every group’s weekly minimum. Groups a preset leaves out get 0.",
+    autoregulate: "Off: loading a workout from this routine brings back last time's numbers unchanged, for you to adjust. The same workouts loaded on their own still follow their own switch.",
   },
 
   presetForm: {
@@ -43,7 +44,8 @@ export const HELP = {
   workoutBuilder: {
     drag: "Long-press an exercise to drag it into a new order.",
     targets: "Targets are optional.",
-    warmups: "Warmups come first. They don't count toward volume or set totals and aren't autoregulated: each one's targets repeat what you did last session.",
+    autoregulate: "Off: when this workout is loaded, last time's numbers come back unchanged, for you to adjust. Its exercises still autoregulate in other workouts.",
+    warmups: "Warmups come first. They don't count toward volume or set totals and aren't autoregulated: each one repeats what you did last session, and that's what's shown here.",
   },
 
   exerciseForm: {
@@ -57,6 +59,7 @@ export const HELP = {
       band). Each set's total is your bodyweight for that day plus that number, and autoregulation steps the added
       weight. Sets logged before you turn this on keep their weight and volume.`,
     note: "Shown every time you do this exercise, e.g. seat height or form cues (optional).",
+    autoregulate: "Off: this exercise is never autoregulated, in any workout or routine or added on its own. Last time's numbers come back unchanged, for you to adjust. The dial in its swipe tray still works.",
   },
 
   progress: {
@@ -81,7 +84,8 @@ export const HELP = {
       the target, one weight step up past the top of the rep range, one step down below the bottom (${range} when a
       set has no range). A routine or workout goes by the last time that workout was done; an exercise added on its
       own goes by its own last session. Deload days are skipped. The dial in a card's swipe tray does this for one
-      exercise any time.`,
+      exercise any time. Routines, workouts and exercises each have their own Autoregulate switch: if any of them is
+      off, last time's numbers come back unchanged for you to adjust.`,
     weightStep: "How much the weight goes up or down. An exercise can set its own on its edit page.",
     deload: `A deload day is a lighter day to recover. Marking one (the button under the day's date) tells
       autoregulation to skip it and base targets on the session before. Turning this off only hides the button:

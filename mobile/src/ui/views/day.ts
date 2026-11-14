@@ -32,7 +32,7 @@ import { HELP } from "../help";
 // How each tracking mode appears as a column.
 const FIELDS: Record<TrackingMode, { field: keyof LogSet; label: string; inputmode: string }> = {
   weight: { field: "weight", label: "lb", inputmode: "decimal" },
-  reps: { field: "reps", label: "Reps", inputmode: "numeric" },
+  reps: { field: "reps", label: "Reps", inputmode: "decimal" }, // partial reps allowed
   time: { field: "duration_seconds", label: "Time", inputmode: "numeric" },
   distance: { field: "distance", label: "mi", inputmode: "decimal" },
 };
@@ -155,8 +155,9 @@ async function dayView(ctx: Ctx, date: string) {
 
   // Autoregulated sets show one rep target as the placeholder, so the ranges they move within are
   // shown under the Reps label: each distinct one in set order (8–15 when the plan had none, AMRAP).
+  // Working sets only: warmups have one rep target, no range (user, 2026-11-14).
   const repRangeNote = (lx: LogEntry) => {
-    const ranges = [...new Set(lx.sets.filter((x) => x.target_reps !== null).map((x) => {
+    const ranges = [...new Set(lx.sets.filter((x) => x.target_reps !== null && !x.is_warmup).map((x) => {
       if (x.target_amrap) return "AMRAP";
       const { min, max } = repRange({ reps_min: x.target_reps_min, reps_max: x.target_reps_max });
       return `${min}–${max}`;

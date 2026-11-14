@@ -2,7 +2,7 @@
 // autosave, notes, reordering, and calendar counts. Ported from app.py.
 import { type Db, get, type Row, utcNow } from "../db/types";
 import {
-  type Autoregulate, defaultStepOf, sessionTargets, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
+  type Autoregulate, carriedSet, defaultStepOf, sessionTargets, nextTargets, NOT_DELOAD, type PreviousSet, type SetTargets, WEIGHT_STEP,
 } from "./autoregulation";
 import { bodyweightOn, listBodyweights } from "./bodyweight";
 import { joinDayWorkout, pruneLogWorkouts, workoutForNewExercises } from "./dayWorkouts";
@@ -10,7 +10,7 @@ import { ConflictError, NotFoundError } from "./errors";
 import { type Exercise, listExercises } from "./exercises";
 import { getRoutine, routineNextIndex } from "./routines";
 import { cleanNote, parseIsoDate, parseLogValue, pyTruthy, repTargetLabel, ValidationError } from "./text";
-import { changePlanWarmups, getWorkout, groupBlocks, type Item, warmupSets, type Workout, workingSets } from "./workouts";
+import { changePlanWarmups, getWorkout, groupBlocks, type Item, warmupReps, warmupSets, type Workout, workingSets } from "./workouts";
 
 export interface LogSet {
   id: number;
@@ -186,7 +186,8 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
         await db.run(
           `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_amrap, target_reps,
              target_weight, target_duration_seconds, target_distance, uses_bodyweight, is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [entryId, n + 1, ws.reps_min, ws.reps_max, ws.is_amrap ? 1 : 0, a ? a.reps : null, a ? a.weight : ws.weight,
+          // A warmup's reps are one number (user), so it's the target even without a carry-over.
+          [entryId, n + 1, ws.reps_min, ws.reps_max, ws.is_amrap ? 1 : 0, a ? a.reps : ws.is_warmup ? warmupReps(ws) : null, a ? a.weight : ws.weight,
             // Warmups are plain weight, never bodyweight totals (user).
             ws.duration_seconds, ws.distance, wx.exercise.uses_bodyweight && !ws.is_warmup ? 1 : 0, ws.is_warmup ? 1 : 0],
         );
@@ -204,7 +205,7 @@ export async function addWorkoutToDay(db: Db, date: string, workout: Workout, ad
 export async function loadWorkout(db: Db, date: string, workoutId: number, autoregulate: Autoregulate = false): Promise<void> {
   checkDate(date);
   const workout = await getWorkout(db, workoutId);
-  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate));
+  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate, workout.autoregulate));
 }
 
 /** Loads the routine's workout at `index` (default: the next one in its rotation). Returns the workout name. */
@@ -217,13 +218,16 @@ export async function loadRoutine(db: Db, date: string, routineId: number, index
     throw new ConflictError("That routine changed. Reload and try again.");
   }
   const workout = await getWorkout(db, routine.workout_ids[i]);
-  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate));
+  // Any switch off (routine, workout, exercise) wins (user, 2026-11-14).
+  const allowed = routine.autoregulate && workout.autoregulate;
+  await addWorkoutToDay(db, date, workout, await sessionTargets(db, date, workout.id, workout.slots, autoregulate, allowed));
   return workout.name;
 }
 
 /**
  * Appends exercises to a day in the given order: 3 empty sets each, or 1 if it doesn't track reps.
- * Autoregulated: each one's targets come from that exercise's last session, as with the AR button.
+ * Autoregulated: each one's targets come from that exercise's last session, as with the AR button;
+ * an exercise with its switch off gets last session's numbers unchanged instead (`carriedSet`).
  * `joinWorkout` (the day screen passes true; off keeps Flask parity): they join the workout in
  * progress, else the latest unfinished one, else stay outside any (agent-notes/day-workouts.md).
  */
@@ -248,7 +252,7 @@ export async function addExercises(db: Db, date: string, ids: unknown, autoregul
         await db.run("INSERT INTO log_set (log_exercise_id, position, uses_bodyweight) VALUES (?, ?, ?)",
           [entryId, n, exercise.uses_bodyweight ? 1 : 0]);
       }
-      if (autoregulate && exercise.tracks.reps) await targetsFromLastSession(db, entryId, defaultStepOf(autoregulate));
+      if (autoregulate && exercise.tracks.reps) await targetsFromLastSession(db, entryId, defaultStepOf(autoregulate), !exercise.autoregulate);
     }
     const target = joinWorkout ? await workoutForNewExercises(db, date) : null;
     if (target !== null) await joinDayWorkout(db, date, target, added);
@@ -321,7 +325,9 @@ export async function setSupersetWithNext(db: Db, entryId: number, link: boolean
 // Set autosave fields: column -> how to validate the value.
 const LOG_FIELDS = {
   weight: { label: "Weight", integer: false, maximum: 10_000 },
-  reps: { label: "Reps", integer: true, maximum: 9_999 },
+  // Partial reps (user, 2026-11-14): any decimals. Not in Flask, which wants whole numbers.
+  // Autoregulation and carry-overs floor them, so targets stay whole (agent-notes/autoregulation.md).
+  reps: { label: "Reps", integer: false, maximum: 9_999, exact: true },
   duration_seconds: { label: "Time", integer: true, maximum: 86_400 },
   distance: { label: "Distance", integer: false, maximum: 1_000 },
 } as const;
@@ -372,7 +378,8 @@ export async function autoregulateEntry(db: Db, entryId: number, defaultStep = W
   return db.transaction(() => targetsFromLastSession(db, entryId, defaultStep));
 }
 
-async function targetsFromLastSession(db: Db, entryId: number, defaultStep: number): Promise<string | null> {
+/** `carry`: last session's numbers unchanged instead of autoregulated ones (`carriedSet`). */
+async function targetsFromLastSession(db: Db, entryId: number, defaultStep: number, carry = false): Promise<string | null> {
   const entry = await getEntry(db, entryId);
   if (!entry.exercise.tracks.reps) throw new ValidationError("Autoregulation needs an exercise that tracks reps.");
   const ref = await get(
@@ -386,7 +393,7 @@ async function targetsFromLastSession(db: Db, entryId: number, defaultStep: numb
     if (!prevSets[n]) break;
     if (s.completed_at !== null) continue;
     const plan = { reps_min: s.target_reps_min, reps_max: s.target_reps_max, is_amrap: s.target_amrap, weight: s.target_weight };
-    const t = nextTargets(
+    const t = carry ? carriedSet(prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight) : nextTargets(
       prevSets[n] as PreviousSet, plan, entry.exercise.tracks.weight, entry.exercise.weight_step ?? defaultStep, entry.exercise.uses_bodyweight,
     );
     const updates: [string, number | null][] = [];
@@ -464,9 +471,9 @@ export async function changeWarmups(db: Db, entryId: number, add: boolean): Prom
     const order = entry.sets.map((x) => x.id);
     if (add) {
       const { lastId } = await db.run(
-        `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_weight, target_duration_seconds,
-           target_distance, is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-        [entryId, (entry.sets.at(-1)?.position ?? 0) + 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null,
+        `INSERT INTO log_set (log_exercise_id, position, target_reps_min, target_reps_max, target_reps, target_weight, target_duration_seconds,
+           target_distance, is_warmup) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [entryId, (entry.sets.at(-1)?.position ?? 0) + 1, last?.target_reps_min ?? null, last?.target_reps_max ?? null, last?.target_reps ?? null,
           last?.target_weight ?? null, last?.target_duration_seconds ?? null, last?.target_distance ?? null],
       );
       order.splice(warmups.length, 0, lastId);

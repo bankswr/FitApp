@@ -143,7 +143,7 @@ function pyFloat(value: unknown): number {
 export function parseLogValue(
   value: unknown,
   label: string,
-  { integer, maximum, minimum = 0 }: { integer: boolean; maximum: number; minimum?: number },
+  { integer, maximum, minimum = 0, exact = false }: { integer: boolean; maximum: number; minimum?: number; exact?: boolean },
 ): number | null {
   if (value == null || value === "") return null;
   if (typeof value === "boolean") throw new ValidationError(`${label} must be a number.`);
@@ -161,7 +161,8 @@ export function parseLogValue(
     if (number !== Math.trunc(number)) throw new ValidationError(`${label} must be a whole number.`);
     return Math.trunc(number);
   }
-  return round2(number);
+  // `exact`: kept as typed, any number of decimals (logged reps; user, 2026-11-14).
+  return exact ? number : round2(number);
 }
 
 /** Python's int() on a value: ints, integral floats truncate, digit strings (with sign/space). */

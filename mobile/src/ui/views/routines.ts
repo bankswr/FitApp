@@ -74,7 +74,7 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
   const name = stashed?.form.name ?? (routine ? routine.name : source ? copyName(source.name) : "");
   const workoutIds = stashed?.form.workout_ids ?? source?.workout_ids ?? [];
   const cycleDays = stashed?.form.cycle_days ?? (source ? String(source.cycle_days) : "7");
-  const autoregulate = stashed?.form.autoregulate ?? source?.autoregulate ?? false;
+  const autoregulate = stashed?.form.autoregulate ?? source?.autoregulate ?? true;
   const targets = stashed?.form.targets ?? targetTexts(source);
   const errors = stashed?.errors ?? [];
   const badTargets = stashed?.badTargets ?? new Set<number>();
@@ -107,6 +107,13 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
           <label for="name">Name</label>
           <input id="name" name="name" type="text" maxlength="100" required autocomplete="off" autocapitalize="words" placeholder="e.g. Push / Pull / Legs" .value=${name}>
         </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" id="autoregulate" name="autoregulate" .checked=${autoregulate}>
+            <span>Autoregulate</span>
+          </label>
+          <p class="hint">${HELP.routineEditor.autoregulate}</p>
+        </div>
         <div class="segmented two" role="tablist" aria-label="Routine sections">
           <button type="button" role="tab" id="tab-workouts" aria-controls="panel-workouts" aria-selected="true" data-tab="workouts">Workouts</button>
           <button type="button" role="tab" id="tab-volume" aria-controls="panel-volume" aria-selected="false" tabindex="-1" data-tab="volume">Volume Planning</button>
@@ -116,9 +123,6 @@ async function routineForm(ctx: Ctx, routine: Routine | null) {
           <p class="hint">${HELP.routineEditor.workouts}</p>
           <ol class="builder-list" id="routine-list"></ol>
           <p class="empty small" id="routine-empty">No workouts yet. Tap <strong>+ Add</strong> to pick some.</p>
-          <!-- Autoregulation is now one switch in Settings (2026-10-10), not per routine. This
-               hidden field only keeps routine.autoregulate's stored value through edits and copies. -->
-          <input type="checkbox" id="autoregulate" name="autoregulate" hidden .checked=${autoregulate}>
         </div>
         <div class="field" role="tabpanel" id="panel-volume" aria-labelledby="tab-volume" hidden>
           <div class="cycle-days">

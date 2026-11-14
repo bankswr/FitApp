@@ -206,6 +206,14 @@ export const MIGRATIONS: (string | ((db: Db) => Promise<void>))[] = [
   ALTER TABLE log_workout ADD COLUMN recovery FLOAT CHECK (recovery IS NULL OR (recovery >= 0 AND recovery <= 1));
   ALTER TABLE log_workout ADD COLUMN effort FLOAT CHECK (effort IS NULL OR (effort >= 0 AND effort <= 1));
   `,
+  // 9: autoregulation switches on exercises, workouts and routines (user, 2026-11-14;
+  // agent-notes/autoregulation.md). Not in Flask. On by default. routine.autoregulate (schema 3,
+  // unread since 2026-10-10) is reused: its column default stays 0, so every insert sets it.
+  `
+  ALTER TABLE exercise ADD COLUMN autoregulate BOOLEAN NOT NULL DEFAULT 1;
+  ALTER TABLE workout ADD COLUMN autoregulate BOOLEAN NOT NULL DEFAULT 1;
+  UPDATE routine SET autoregulate = 1;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

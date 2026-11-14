@@ -136,8 +136,9 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
     ? {
       name: exercise.name, tracking: exercise.modes, primary: exercise.primary, ancillary: exercise.ancillary,
       note: exercise.note ?? "", weight_step: formatNumber(exercise.weight_step), uses_bodyweight: exercise.uses_bodyweight,
+      autoregulate: exercise.autoregulate,
     }
-    : { name: "", tracking: [], primary: [], ancillary: [], note: "", weight_step: "", uses_bodyweight: false });
+    : { name: "", tracking: [], primary: [], ancillary: [], note: "", weight_step: "", uses_bodyweight: false, autoregulate: true });
   const errors = stashed?.errors ?? [];
   const muscles = await muscleChoices(ctx.db, [...form.primary, ...form.ancillary]);
   const selected = Object.fromEntries(MUSCLE_ROLES.map((r) => [r, new Set(form[r].map((m) => m.toLowerCase()))]));
@@ -197,6 +198,13 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
           </label>
           <p class="hint">${HELP.exerciseForm.bodyweight}</p>
         </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" name="autoregulate" id="autoregulate" ?checked=${form.autoregulate ?? true}>
+            <span>Autoregulate</span>
+          </label>
+          <p class="hint">${HELP.exerciseForm.autoregulate}</p>
+        </div>
         <div class="field" id="weight-step-field" ?hidden=${!form.tracking.includes("weight")}>
           <label for="weight_step">Autoregulation weight step</label>
           <p class="hint">${HELP.exerciseForm.weightStep(weightStepDefault())}</p>
@@ -243,6 +251,7 @@ async function exerciseForm(ctx: Ctx, exercise: Exercise | null) {
           note: String(data.get("note") ?? ""),
           weight_step: String(data.get("weight_step") ?? ""),
           uses_bodyweight: data.has("uses_bodyweight"),
+          autoregulate: data.has("autoregulate"),
         };
         const result = await saveExercise(ctx.db, exercise?.id ?? null, input);
         if (result.ok) {

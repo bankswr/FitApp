@@ -46,12 +46,13 @@ export async function openTestDb(bytes?: Uint8Array): Promise<Db & { raw: Databa
   return db;
 }
 
-// Columns the mobile schema added after Flask (schemas 3 and 5), with the default they take on Flask data.
+// Columns the mobile schema added after Flask (schemas 3, 5, 6, 7, 9), with the default they take on Flask data.
 const MOBILE_ONLY_COLUMNS: Record<string, Record<string, unknown>> = {
-  routine: { autoregulate: 0 },
+  routine: { autoregulate: 1 },
+  workout: { autoregulate: 1 },
   log_set: { target_reps: null, uses_bodyweight: 0, is_warmup: 0 },
   workout_set: { is_warmup: 0 },
-  exercise: { weight_step: null, uses_bodyweight: 0 },
+  exercise: { weight_step: null, uses_bodyweight: 0, autoregulate: 1 },
 };
 
 // Mobile-only data derived from what Flask has (schema 4: workouts on the day), left out of comparisons.

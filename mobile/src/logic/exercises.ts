@@ -20,6 +20,8 @@ export interface Exercise {
   weight_step: number | null;
   /** Logs added weight / assistance on top of the day's bodyweight. Mobile only (schema 6; logic/bodyweight.ts). */
   uses_bodyweight: boolean;
+  /** Off: never autoregulated when loaded or added; last session's numbers carry over (schema 9; agent-notes/autoregulation.md). */
+  autoregulate: boolean;
 }
 
 /** Every exercise (by name), with tracking modes and muscle names in canonical order. */
@@ -38,6 +40,7 @@ export async function listExercises(db: Db, ids?: number[]): Promise<Exercise[]>
         .map((m) => m.name);
     return {
       id: r.id, name: r.name, note: r.note, tracks, weight_step: r.weight_step ?? null, uses_bodyweight: Boolean(r.uses_bodyweight),
+      autoregulate: Boolean(r.autoregulate ?? 1),
       modes: TRACKING_MODES.filter((m) => tracks[m]),
       primary: muscles("primary"), ancillary: muscles("ancillary"),
     };
@@ -77,6 +80,8 @@ export interface ExerciseForm {
   weight_step?: string;
   /** Bodyweight exercise; it implies tracking weight. Optional so Flask-parity forms still fit. */
   uses_bodyweight?: boolean;
+  /** Autoregulation switch; missing → on. Optional so Flask-parity forms still fit. */
+  autoregulate?: boolean;
 }
 
 export type SaveResult = { ok: true; id: number; name: string } | { ok: false; errors: string[]; form: ExerciseForm };
@@ -93,6 +98,7 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     note: input.note ?? "",
     weight_step: input.weight_step ?? "",
     uses_bodyweight: Boolean(input.uses_bodyweight),
+    autoregulate: input.autoregulate ?? true,
   };
   // A bodyweight exercise logs added weight, so it tracks weight (in the usual mode order).
   if (form.uses_bodyweight && !form.tracking.includes("weight")) {
@@ -133,15 +139,15 @@ export async function saveExercise(db: Db, id: number | null, input: ExerciseFor
     if (exerciseId === null) {
       exerciseId = (await db.run(
         `INSERT INTO exercise (name, note, tracks_weight, tracks_reps, tracks_time, tracks_distance, weight_step, uses_bodyweight,
-           created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, utcNow()],
+           autoregulate, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, form.autoregulate ? 1 : 0, utcNow()],
       )).lastId;
     } else {
       await db.run("DELETE FROM exercise_muscle WHERE exercise_id = ?", [exerciseId]);
       await db.run(
         `UPDATE exercise SET name = ?, note = ?, tracks_weight = ?, tracks_reps = ?, tracks_time = ?, tracks_distance = ?,
-           weight_step = ?, uses_bodyweight = ? WHERE id = ?`,
-        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, exerciseId],
+           weight_step = ?, uses_bodyweight = ?, autoregulate = ? WHERE id = ?`,
+        [form.name, note, tracks.weight, tracks.reps, tracks.time, tracks.distance, weightStep, bodyweight, form.autoregulate ? 1 : 0, exerciseId],
       );
       // Sets with nothing recorded yet follow the new setting; recorded ones keep theirs, so
       // history and volume never change (user, 2026-10-23). Assistance can't be a plain target.

@@ -1,6 +1,7 @@
 // Workouts: the list and the workout builder. Ported from templates/workouts.html,
 // workout_builder.html and static/workout_builder.js.
 import { html, nothing } from "lit-html";
+import { sessionTargets } from "../../logic/autoregulation";
 import { dayEntries, dayToWorkoutItems } from "../../logic/day";
 import { wrapIntoDayWorkout } from "../../logic/dayWorkouts";
 import { exercisePickerData, type PickerOption } from "../../logic/exercises";
@@ -68,10 +69,13 @@ route(/^\/workouts$/, async (ctx) => {
 route(/^\/workouts\/new$/, (ctx) => builder(ctx, null));
 route(/^\/workouts\/(\d+)$/, async (ctx) => builder(ctx, await getWorkout(ctx.db, Number(ctx.params[0]))));
 
-type BuilderStash = { errors: string[]; name: string; items: Item[] };
+/** A date after every session, so `sessionTargets` refers to the latest one (today's included). */
+const LATEST = "9999-12-31";
+
+type BuilderStash = { errors: string[]; name: string; items: Item[]; autoregulate: boolean };
 // Unsaved builder state kept while "+ New exercise" visits the exercise form, keyed by the
 // builder's own route; restored (with the new exercises added) when it comes back.
-type Draft = { name: string; items: EditItem[] };
+type Draft = { name: string; items: EditItem[]; autoregulate: boolean };
 const drafts = new Map<string, Draft>();
 
 /** Where Back and Save go: ?next= (e.g. from a routine card) or the workouts list. Same-app routes only. */
@@ -88,9 +92,12 @@ async function builder(ctx: Ctx, workout: Workout | null) {
   const copyId = Number(ctx.query.get("copy"));
   const source = workout ?? (copyId ? await getWorkout(ctx.db, copyId) : null);
   const name = stashed?.name ?? (workout ? workout.name : source ? copyName(source.name) : "");
+  const autoregulate = stashed?.autoregulate ?? source?.autoregulate ?? true;
   // ?day=<date>: "Build workout from day" — the day's exercises, blank targets, blank name.
   const fromDay = !workout && !source && ctx.query.get("day");
-  const items = stashed?.items ?? (source ? workoutToItems(source) : fromDay ? dayToWorkoutItems(await dayEntries(ctx.db, fromDay)) : []);
+  // Warmups show what the next load would use (user, 2026-11-14): carried over from the latest session.
+  const current = source ? await sessionTargets(ctx.db, LATEST, source.id, source.slots, false) : undefined;
+  const items = stashed?.items ?? (source ? workoutToItems(source, current) : fromDay ? dayToWorkoutItems(await dayEntries(ctx.db, fromDay)) : []);
   const errors = stashed?.errors ?? [];
   const { options, muscles } = await exercisePickerData(ctx.db);
   const blocked = workout ? await workoutDeleteBlocker(ctx.db, workout.id) : null;
@@ -111,6 +118,13 @@ async function builder(ctx: Ctx, workout: Workout | null) {
         <div class="field">
           <label for="name">Name</label>
           <input id="name" name="name" type="text" maxlength="100" required autocomplete="off" autocapitalize="words" placeholder="e.g. Push Day" .value=${name}>
+        </div>
+        <div class="field">
+          <label class="switch">
+            <input type="checkbox" id="autoregulate" name="autoregulate" .checked=${autoregulate}>
+            <span>Autoregulate</span>
+          </label>
+          <p class="hint">${HELP.workoutBuilder.autoregulate}</p>
         </div>
         <div class="field">
           <span class="field-label">Exercises <span class="set-count" id="builder-sets"></span></span>
@@ -136,8 +150,8 @@ async function builder(ctx: Ctx, workout: Workout | null) {
           <p class="empty small">You haven't created any exercises yet. <a href=${newExercise} data-leave>Create one first</a>.</p>`}
       </dialog>`,
     mount(root: HTMLElement, signal: AbortSignal) {
-      mountBuilder(root, signal, options, items, here, async (rawName, finalItems) => {
-        const result = await saveWorkout(ctx.db, workout?.id ?? null, rawName, finalItems);
+      mountBuilder(root, signal, options, items, here, async (rawName, finalItems, autoregulate) => {
+        const result = await saveWorkout(ctx.db, workout?.id ?? null, rawName, finalItems, autoregulate);
         if (result.ok) {
           // From a day (user): the day's exercises still in the template become this workout there.
           if (fromDay) {
@@ -149,7 +163,7 @@ async function builder(ctx: Ctx, workout: Workout | null) {
         } else {
           // Keep each item's day entry through the round trip (the saved items come back in order).
           const kept = result.items.map((it, i) => (finalItems[i]?.exercise_id === it.exercise_id ? { ...it, lx: finalItems[i].lx } : it));
-          stash({ errors: result.errors, name: result.name, items: kept } satisfies BuilderStash);
+          stash({ errors: result.errors, name: result.name, items: kept, autoregulate: result.autoregulate } satisfies BuilderStash);
           await refresh();
           window.scrollTo(0, 0);
         }
@@ -172,7 +186,8 @@ async function builder(ctx: Ctx, workout: Workout | null) {
 // is committed (blur), the column is "filled" and later edits stay put.
 //
 // Warmups (agent-notes/warmups.md) are sets with `warmup: true`, kept first in `sets`. They have their
-// own rows above the working sets, with a weight target (for incremental loading) and no AMRAP.
+// own rows above the working sets, with a weight target (for incremental loading) and one reps
+// number, no range or AMRAP: typed into `min`, mirrored into `max`.
 // Autofill keeps the two kinds apart.
 
 const DEFAULT_SET_COUNT = 3;
@@ -188,7 +203,7 @@ const fillKey = (field: Field, set: EditSet) => (set.warmup ? `${field}:w` : fie
 
 function mountBuilder(
   root: HTMLElement, signal: AbortSignal, options: PickerOption[], initial: Item[], draftKey: string,
-  onSave: (name: string, items: EditItem[]) => Promise<void>,
+  onSave: (name: string, items: EditItem[], autoregulate: boolean) => Promise<void>,
 ) {
   const byId = new Map(options.map((o) => [o.id, o]));
   const quickFill = quickFillOn(); // Settings can turn autofill off (ui/prefs.ts)
@@ -207,6 +222,7 @@ function mountBuilder(
   });
 
   const list = root.querySelector<HTMLElement>("#builder-list")!;
+  const arBox = root.querySelector<HTMLInputElement>("#autoregulate")!;
   const empty = root.querySelector<HTMLElement>("#builder-empty")!;
   const hint = root.querySelector<HTMLElement>("#builder-hint")!;
   const setCount = root.querySelector<HTMLElement>("#builder-sets")!;
@@ -257,14 +273,8 @@ function mountBuilder(
       if (m === "weight") return textInput("weight", i, s, set, { inputmode: "decimal", label: `${label} weight in lb` });
       if (m === "time") return textInput("time", i, s, set, { inputmode: "numeric", label: `${label} time`, placeholder: "m:ss", invalid: timeInvalid(set) });
       if (m === "distance") return textInput("distance", i, s, set, { inputmode: "decimal", label: `${label} distance in miles` });
-      const bad = rangeInvalid(set) ? " invalid" : "";
-      return `<span class="rep-range">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="min" data-i="${i}" data-s="${s}" class="${bad}"
-            value="${set.min ?? ""}" placeholder="min" aria-label="${label} minimum reps">
-          <span class="range-dash">–</span>
-          <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="max" data-i="${i}" data-s="${s}" class="${bad}"
-            value="${set.max ?? ""}" placeholder="max" aria-label="${label} maximum reps">
-        </span>`;
+      return `<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" data-field="min" data-i="${i}" data-s="${s}"
+          value="${set.min ?? ""}" placeholder="–" aria-label="${label} reps" autocomplete="off">`;
     });
     return `<li class="set-row warmup" style="grid-template-columns: ${warmupColumns(item)}">
       <span class="set-num">${num}</span>
@@ -473,6 +483,8 @@ function mountBuilder(
         markValidity(i, t);
       });
     }
+    // A warmup's one reps number is stored as min = max.
+    if (field === "min") for (const set of item.sets) if (isWarmup(set)) set.max = set.min;
   }, { signal });
 
   // Committing a non-empty first entry ends autofill for that column. Readable times are tidied
@@ -546,7 +558,7 @@ function mountBuilder(
   // "+ New" leaves for the exercise form: keep the unsaved workout for when it comes back.
   picker.addEventListener("click", (e) => {
     if (!(e.target as Element).closest("[data-leave]")) return;
-    drafts.set(draftKey, { name: root.querySelector<HTMLInputElement>("#name")!.value, items: structuredClone(items) });
+    drafts.set(draftKey, { name: root.querySelector<HTMLInputElement>("#name")!.value, items: structuredClone(items), autoregulate: arBox.checked });
   }, { signal });
   pickerList?.addEventListener("click", (e) => {
     const btn = (e.target as Element).closest<HTMLButtonElement>("button[data-id]");
@@ -559,7 +571,7 @@ function mountBuilder(
   const form = root.querySelector<HTMLFormElement>("#builder-form")!;
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    void onSave(root.querySelector<HTMLInputElement>("#name")!.value, items);
+    void onSave(root.querySelector<HTMLInputElement>("#name")!.value, items, arBox.checked);
   }, { signal });
 
   // Back from "+ New": restore the unsaved workout, then add the exercises made there.
@@ -567,6 +579,7 @@ function mountBuilder(
   drafts.delete(draftKey);
   if (draft) {
     root.querySelector<HTMLInputElement>("#name")!.value = draft.name;
+    arBox.checked = draft.autoregulate;
     items.splice(0, items.length, ...draft.items.filter((it) => byId.has(it.exercise_id)));
   }
   for (const id of takeCreatedExercises(draftKey)) if (byId.has(id)) addExercise(id);

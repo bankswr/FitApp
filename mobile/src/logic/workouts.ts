@@ -36,6 +36,8 @@ export interface WorkoutSlot {
 export interface Workout {
   id: number;
   name: string;
+  /** Off: its exercises aren't autoregulated when it's loaded (schema 9; agent-notes/autoregulation.md). */
+  autoregulate: boolean;
   slots: WorkoutSlot[];
 }
 
@@ -88,7 +90,7 @@ function toSet(r: Row): WorkoutSet {
 /** Workouts by name (or just `ids`), with their slots, exercises and planned sets in order. */
 export async function listWorkouts(db: Db, ids?: number[]): Promise<Workout[]> {
   const where = ids ? `WHERE id IN (${ids.map(() => "?").join(",") || "NULL"})` : "";
-  const workouts = await db.all(`SELECT id, name FROM workout ${where} ORDER BY name`, ids ?? []);
+  const workouts = await db.all(`SELECT id, name, autoregulate FROM workout ${where} ORDER BY name`, ids ?? []);
   if (!workouts.length) return [];
   const slots = await db.all("SELECT * FROM workout_exercise ORDER BY workout_id, position");
   const sets = await db.all("SELECT * FROM workout_set ORDER BY workout_exercise_id, position");
@@ -101,6 +103,7 @@ export async function listWorkouts(db: Db, ids?: number[]): Promise<Workout[]> {
   return workouts.map((w) => ({
     id: w.id,
     name: w.name,
+    autoregulate: Boolean(w.autoregulate),
     slots: slots.filter((wx) => wx.workout_id === w.id).map((wx) => ({
       id: wx.id, position: wx.position, superset_group: wx.superset_group,
       exercise: exercises.get(wx.exercise_id)!, sets: setsBySlot.get(wx.id) ?? [],
@@ -235,16 +238,27 @@ export function parseWorkoutItems(raw: unknown, exercisesById: Map<number, Exerc
   return { items, errors };
 }
 
-/** The builder's items for a saved workout (inverse of saving). */
-export function workoutToItems(workout: Workout): Item[] {
+/** A warmup's single reps target (user, 2026-11-14: warmups have no range): stored as min = max. */
+export const warmupReps = (s: Pick<WorkoutSet, "reps_min" | "reps_max">) => s.reps_min ?? s.reps_max;
+
+/**
+ * The builder's items for a saved workout (inverse of saving). `current` (from `sessionTargets`)
+ * replaces each warmup's reps and weight with what the next load would use (user, 2026-11-14:
+ * the builder shows the warmups' current settings; agent-notes/warmups.md).
+ */
+export function workoutToItems(workout: Workout, current?: ({ reps: number | null; weight: number | null } | null)[][]): Item[] {
   const slots = workout.slots;
   return slots.map((wx, i) => ({
     exercise_id: wx.exercise.id,
     superset_next: wx.superset_group !== null && i + 1 < slots.length && slots[i + 1].superset_group === wx.superset_group,
-    sets: wx.sets.map((s) => ({
-      min: s.reps_min, max: s.reps_max, amrap: s.is_amrap, weight: s.weight, time: s.duration_seconds, distance: s.distance,
-      ...(s.is_warmup ? { warmup: true } : {}),
-    })),
+    sets: wx.sets.map((s, n) => {
+      if (!s.is_warmup) {
+        return { min: s.reps_min, max: s.reps_max, amrap: s.is_amrap, weight: s.weight, time: s.duration_seconds, distance: s.distance };
+      }
+      const now = current?.[i]?.[n];
+      const reps = now?.reps ?? warmupReps(s);
+      return { min: reps, max: reps, amrap: false, weight: now ? now.weight : s.weight, time: s.duration_seconds, distance: s.distance, warmup: true };
+    }),
   }));
 }
 
@@ -275,10 +289,12 @@ async function insertSlots(db: Db, workoutId: number, items: Item[]) {
 
 export type SaveWorkoutResult =
   | { ok: true; id: number; name: string }
-  | { ok: false; errors: string[]; name: string; items: Item[] };
+  | { ok: false; errors: string[]; name: string; items: Item[]; autoregulate: boolean };
 
-/** Create (id null) or replace a workout's name and whole plan. */
-export async function saveWorkout(db: Db, id: number | null, rawName: string, rawItems: unknown): Promise<SaveWorkoutResult> {
+/** Create (id null) or replace a workout's name, autoregulation switch and whole plan. */
+export async function saveWorkout(
+  db: Db, id: number | null, rawName: string, rawItems: unknown, autoregulate = true,
+): Promise<SaveWorkoutResult> {
   if (id !== null) await getWorkout(db, id);
   const name = cleanName(rawName ?? "", 100);
   const exercisesById = new Map((await listExercises(db)).map((e) => [e.id, e]));
@@ -287,14 +303,15 @@ export async function saveWorkout(db: Db, id: number | null, rawName: string, ra
   if (!name) errors.unshift("Name is required.");
   else if (duplicate) errors.unshift(`A workout named “${name}” already exists.`);
   if (!items.length && !errors.length) errors.push("Add at least one exercise.");
-  if (errors.length) return { ok: false, errors, name, items };
+  if (errors.length) return { ok: false, errors, name, items, autoregulate };
 
   const savedId = await db.transaction(async () => {
     let workoutId = id;
     if (workoutId === null) {
-      workoutId = (await db.run("INSERT INTO workout (name, created_at) VALUES (?, ?)", [name, utcNow()])).lastId;
+      workoutId = (await db.run("INSERT INTO workout (name, created_at, autoregulate) VALUES (?, ?, ?)",
+        [name, utcNow(), autoregulate ? 1 : 0])).lastId;
     } else {
-      await db.run("UPDATE workout SET name = ? WHERE id = ?", [name, workoutId]);
+      await db.run("UPDATE workout SET name = ?, autoregulate = ? WHERE id = ?", [name, autoregulate ? 1 : 0, workoutId]);
       // Replace the whole plan (history snapshots targets, so nothing references these rows).
       await db.run("DELETE FROM workout_exercise WHERE workout_id = ?", [workoutId]);
     }

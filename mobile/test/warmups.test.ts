@@ -9,7 +9,8 @@ import { listDayWorkouts } from "../src/logic/dayWorkouts";
 import { saveExercise } from "../src/logic/exercises";
 import { syncMuscleGroups } from "../src/logic/muscles";
 import { progressData } from "../src/logic/progress";
-import { getWorkout, saveWorkout, slotSummary, workoutMuscleSets, workoutSetCount } from "../src/logic/workouts";
+import { sessionTargets } from "../src/logic/autoregulation";
+import { getWorkout, saveWorkout, slotSummary, workoutMuscleSets, workoutSetCount, workoutToItems } from "../src/logic/workouts";
 import { openTestDb } from "./sqljs";
 
 const set = (min: number | null, max: number | null, weight: string | null = null, warmup = false, amrap = false) =>
@@ -106,7 +107,7 @@ describe("warmups on a day", () => {
     await loadWorkout(c.db, "2026-10-02", c.workoutId);
     const sets = (await entry(c, "2026-10-02", c.bench)).sets;
     expect(sets.map((s) => [s.target_reps, s.target_weight, s.target_label])).toEqual([
-      [6, 65, "6"], [null, 95, "3"], [null, 135, "8–12"], [null, 135, "8–12"],
+      [6, 65, "6"], [3, 95, "3"], [null, 135, "8–12"], [null, 135, "8–12"],
     ]);
     // Values are left blank: targets only.
     expect(sets.map((s) => [s.reps, s.weight])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
@@ -117,7 +118,32 @@ describe("warmups on a day", () => {
     await changeWarmups(c.db, (await entry(c, "2026-10-03", c.bench)).id, true);
     await loadWorkout(c.db, "2026-10-04", c.workoutId);
     expect((await entry(c, "2026-10-04", c.bench)).sets.filter((s) => s.is_warmup).map((s) => [s.target_reps, s.target_weight]))
-      .toEqual([[6, 65], [null, 95], [null, 95]]);
+      .toEqual([[6, 65], [3, 95], [3, 95]]);
+  });
+
+  it("floors a partial rep when carrying a warmup over", async () => {
+    const c = await setup();
+    await loadWorkout(c.db, "2026-10-01", c.workoutId);
+    const [w1] = (await entry(c, "2026-10-01", c.bench)).sets;
+    await updateSet(c.db, w1.id, { reps: 5.5, weight: 65, completed: true });
+    await loadWorkout(c.db, "2026-10-02", c.workoutId);
+    expect((await entry(c, "2026-10-02", c.bench)).sets[0]).toMatchObject({ target_reps: 5, target_weight: 65 });
+  });
+
+  it("shows the warmups' current settings in the builder: one reps number, carried over from the latest session", async () => {
+    const c = await setup();
+    const builderWarmups = async () => {
+      const w = await getWorkout(c.db, c.workoutId);
+      return workoutToItems(w, await sessionTargets(c.db, "9999-12-31", w.id, w.slots, false))[0].sets
+        .map((s) => [s.warmup ?? false, s.min, s.max, s.weight]);
+    };
+    // Never done: the plan's numbers.
+    expect(await builderWarmups()).toEqual([[true, 5, 5, 45], [true, 3, 3, 95], [false, 8, 12, 135], [false, 8, 12, 135]]);
+    await loadWorkout(c.db, "2026-10-01", c.workoutId);
+    const [w1] = (await entry(c, "2026-10-01", c.bench)).sets;
+    await updateSet(c.db, w1.id, { reps: 6, weight: 65, completed: true });
+    // The latest session counts, today's included; working sets keep the plan.
+    expect(await builderWarmups()).toEqual([[true, 6, 6, 65], [true, 3, 3, 95], [false, 8, 12, 135], [false, 8, 12, 135]]);
   });
 
   it("carries a warmup added or removed on the day over to the workout", async () => {

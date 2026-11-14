@@ -192,6 +192,12 @@ const DIVERGES: Record<number, unknown> = {
   // (log_workout, agent-notes/day-workouts.md), so the later Arms Day is the most recent and the
   // rotation continues after slot 3 (index 0 next); Flask merges them into one.
   57: [2, 0, 1, 2, 2],
+  // Partial reps (user, 2026-11-14): mobile saves 5.5 reps where Flask wants a whole number.
+  40: { ok: { weight: null, reps: 5.5, duration_seconds: null, distance: null, completed: false } },
+};
+// Mobile-only steps run right after a diverging one, to get back to Flask's state.
+const UNDO: Record<number, (step: any) => any> = {
+  40: (step) => ({ ...step, data: { reps: "" } }),
 };
 
 it.skipIf(!ready)("replays the Flask scenario with identical results and final data", async () => {
@@ -204,6 +210,7 @@ it.skipIf(!ready)("replays the Flask scenario with identical results and final d
   for (const [i, step] of steps.entries()) {
     const [want, got] = normalize(DIVERGES[i] ?? expected.results[i], await run(db, step, expected.today));
     expect(got, `step ${i}: ${step.op}`).toEqual(want);
+    if (UNDO[i]) await run(db, UNDO[i](step), expected.today);
   }
   const final = await dump(db);
   for (const table of TABLES) {

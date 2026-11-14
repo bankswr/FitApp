@@ -49,6 +49,8 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
   // bodyweight and uses_bodyweight flags (default 0): an older backup gets the default bodyweight
   // exercises marked, as the migration does; its logged sets keep their volume. Schema 7 added
   // is_warmup flags (default 0), and schema 8 nullable log_workout ratings, so older backups need nothing.
+  // Schema 9 added autoregulate switches (default on); routine.autoregulate meant something else
+  // before (and defaults to 0), so an older backup's routines are switched on.
   const tables = backup.tables;
   if (!tables || typeof tables !== "object") throw new BackupError("The backup has no data.");
   const unknown = Object.keys(tables).filter((t) => !(TABLES as readonly string[]).includes(t));
@@ -75,6 +77,7 @@ export async function importBackup(db: Db, data: unknown): Promise<Record<string
     }
     if (backup.schema! < 4) await groupLogWorkouts(db);
     if (backup.schema! < 6) await markDefaultBodyweightExercises(db);
+    if (backup.schema! < 9) await db.run("UPDATE routine SET autoregulate = 1");
     const broken = await db.all("PRAGMA foreign_key_check");
     if (broken.length) throw new BackupError("The backup's data is inconsistent (broken references).");
   });

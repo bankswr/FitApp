@@ -9,7 +9,7 @@ export interface Routine {
   id: number;
   name: string;
   cycle_days: number;
-  /** Autoregulation (user requirement): loading its workouts adjusts reps/weight targets from the last session. */
+  /** Off: its workouts aren't autoregulated when loaded from it (schema 9; agent-notes/autoregulation.md). */
   autoregulate: boolean;
   /** Workout ids in order (repeats allowed). */
   workout_ids: number[];
@@ -54,6 +54,7 @@ export interface RoutineForm {
   name: string;
   workout_ids: unknown;
   cycle_days: string;
+  /** Missing → on. */
   autoregulate?: boolean;
   /** muscle_group_id -> the text in its target input. */
   targets: Record<number, string>;
@@ -78,7 +79,7 @@ export async function saveRoutine(db: Db, id: number | null, input: RoutineForm)
   if (!/^\d+$/.test(cycle) || !(Number(cycle) >= 1 && Number(cycle) <= 365)) {
     errors.push("Days to complete the routine must be a whole number from 1 to 365.");
   }
-  const autoregulate = Boolean(input.autoregulate);
+  const autoregulate = input.autoregulate ?? true;
   const badTargets = new Set<number>();
   const texts: Record<number, string> = {};
   const parsed = new Map<number, number | null>();

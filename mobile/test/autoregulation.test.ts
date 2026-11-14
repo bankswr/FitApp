@@ -7,7 +7,7 @@ import { addExercises, addLogSet, autoregulateEntry, clearDay, dayEntries, loadR
 import { getExercise, saveExercise } from "../src/logic/exercises";
 import { syncMuscleGroups } from "../src/logic/muscles";
 import { getRoutine, saveRoutine } from "../src/logic/routines";
-import { saveWorkout, type WorkoutSet } from "../src/logic/workouts";
+import { getWorkout, saveWorkout, type WorkoutSet } from "../src/logic/workouts";
 import { openTestDb } from "./sqljs";
 
 const plan = (min: number | null, max: number | null, weight: number | null = 135): WorkoutSet =>
@@ -121,8 +121,8 @@ describe("autoregulated routine loads", () => {
     expect((await targets(c, "2026-10-03", c.row))[1]).toEqual([11, 100, "11"]);
   });
 
-  it("does nothing when the Settings switch is off, whatever the routine's old flag says", async () => {
-    const c = await setup(); // the routine still has autoregulate = 1 stored
+  it("does nothing when the Settings switch is off, whatever the routine's switch says", async () => {
+    const c = await setup(); // the routine's switch is on
     expect((await getRoutine(c.db, c.routineId)).autoregulate).toBe(true);
     await loadRoutine(c.db, "2026-10-01", c.routineId);
     await log(c, "2026-10-01", c.bench, [[10, 135]]);
@@ -202,6 +202,100 @@ describe("autoregulated routine loads", () => {
     await loadRoutine(c.db, "2026-10-05", c.routineId, undefined, true);
     expect((await targets(c, "2026-10-05", c.bench))[0]).toEqual([11, 135, "11"]);
     expect((await targets(c, "2026-10-05", c.bench))[1]).toEqual([null, 135, "8–12"]);
+  });
+});
+
+describe("autoregulation switches (user, 2026-11-14)", () => {
+  /** Logs one session through the routine, so the next load has a reference. */
+  async function firstSession(c: Ctx) {
+    await loadRoutine(c.db, "2026-10-01", c.routineId, undefined, true);
+    await log(c, "2026-10-01", c.bench, [[10, 135], [7, 135], [20, 95]]);
+    await log(c, "2026-10-01", c.row, [[10, 100]]);
+  }
+  // Autoregulated: bench 11 @ 135 / 8 @ 130 / 21; carried over unchanged: what was logged.
+  const carried = [[10, 135, "10"], [7, 135, "7"], [20, 95, "20"]];
+
+  it("saves on exercises, workouts and routines, on by default", async () => {
+    const c = await setup();
+    expect((await getExercise(c.db, c.bench)).autoregulate).toBe(true);
+    expect((await getWorkout(c.db, c.workoutId)).autoregulate).toBe(true);
+    const form = { name: "Bench", tracking: ["weight", "reps"], primary: ["Chest"], ancillary: [], note: "", autoregulate: false };
+    expect((await saveExercise(c.db, c.bench, form)).ok).toBe(true);
+    expect((await getExercise(c.db, c.bench)).autoregulate).toBe(false);
+    expect((await saveWorkout(c.db, c.workoutId, "Push", JSON.stringify(c.items([c.bench])), false)).ok).toBe(true);
+    expect((await getWorkout(c.db, c.workoutId)).autoregulate).toBe(false);
+    await saveRoutine(c.db, c.routineId, { name: "R", workout_ids: [c.workoutId], cycle_days: "7", autoregulate: false, targets: {} });
+    expect((await getRoutine(c.db, c.routineId)).autoregulate).toBe(false);
+    await saveRoutine(c.db, c.routineId, { name: "R", workout_ids: [c.workoutId], cycle_days: "7", targets: {} });
+    expect((await getRoutine(c.db, c.routineId)).autoregulate).toBe(true);
+  });
+
+  it("an exercise switched off never autoregulates: last time's numbers carry over", async () => {
+    const c = await setup();
+    await firstSession(c);
+    await c.db.run("UPDATE exercise SET autoregulate = 0 WHERE id = ?", [c.bench]);
+    await loadRoutine(c.db, "2026-10-03", c.routineId, undefined, true);
+    await loadWorkout(c.db, "2026-10-04", c.workoutId, true);
+    await addExercises(c.db, "2026-10-05", [c.bench], true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual(carried);
+    expect(await targets(c, "2026-10-04", c.bench)).toEqual(carried);
+    expect(await targets(c, "2026-10-05", c.bench)).toEqual(carried); // ad hoc, from the exercise's own last session
+    expect(await targets(c, "2026-10-03", c.row)).toEqual([[11, 100, "11"]]); // others still autoregulate
+  });
+
+  it("a workout switched off doesn't autoregulate when loaded; its exercises still do elsewhere", async () => {
+    const c = await setup();
+    await firstSession(c);
+    await c.db.run("UPDATE workout SET autoregulate = 0 WHERE id = ?", [c.workoutId]);
+    // Each load is checked and cleared, so the next one still goes by 2026-10-01.
+    await loadWorkout(c.db, "2026-10-03", c.workoutId, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual(carried);
+    expect(await targets(c, "2026-10-03", c.row)).toEqual([[10, 100, "10"]]);
+    await clearDay(c.db, "2026-10-03");
+    await loadRoutine(c.db, "2026-10-03", c.routineId, undefined, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual(carried); // through a routine too
+    await clearDay(c.db, "2026-10-03");
+    await addExercises(c.db, "2026-10-03", [c.bench], true);
+    expect((await targets(c, "2026-10-03", c.bench))[0]).toEqual([11, 135, "11"]);
+  });
+
+  it("a routine switched off doesn't autoregulate its workouts; the workout on its own still does", async () => {
+    const c = await setup();
+    await firstSession(c);
+    await c.db.run("UPDATE routine SET autoregulate = 0 WHERE id = ?", [c.routineId]);
+    await loadRoutine(c.db, "2026-10-03", c.routineId, undefined, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual(carried);
+    await clearDay(c.db, "2026-10-03");
+    await loadWorkout(c.db, "2026-10-03", c.workoutId, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual([[11, 135, "11"], [8, 130, "8"], [21, 95, "21"]]);
+  });
+
+  it("the AR button still works on an exercise switched off", async () => {
+    const c = await setup();
+    await firstSession(c);
+    await c.db.run("UPDATE exercise SET autoregulate = 0 WHERE id = ?", [c.bench]);
+    await loadWorkout(c.db, "2026-10-03", c.workoutId, true);
+    const entry = (await dayEntries(c.db, "2026-10-03")).find((lx) => lx.exercise.id === c.bench)!;
+    expect(await autoregulateEntry(c.db, entry.id)).toBe("2026-10-01");
+    expect((await targets(c, "2026-10-03", c.bench))[0]).toEqual([11, 135, "11"]);
+  });
+});
+
+describe("partial reps (user, 2026-11-14)", () => {
+  it("saves any decimals, and targets floor them: a partial rep counts as not done", async () => {
+    expect(nextTargets(done(10.5, 135, 10), plan(8, 12), true)).toEqual({ reps: 11, weight: 135 }); // as 10
+    expect(nextTargets(done(7.9, 135, 8), plan(8, 12), true)).toEqual({ reps: 8, weight: 130 }); // as 7: under the min
+    const c = await setup();
+    await loadRoutine(c.db, "2026-10-01", c.routineId, undefined, true);
+    await log(c, "2026-10-01", c.bench, [[9.333, 135], [7.5, 135], [20.25, 95]]);
+    expect((await sets(c, "2026-10-01", c.bench)).map((s) => s.reps)).toEqual([9.333, 7.5, 20.25]);
+    await loadRoutine(c.db, "2026-10-03", c.routineId, undefined, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual([[10, 135, "10"], [8, 130, "8"], [21, 95, "21"]]);
+    // Switched off: last time's numbers, floored.
+    await clearDay(c.db, "2026-10-03");
+    await c.db.run("UPDATE exercise SET autoregulate = 0 WHERE id = ?", [c.bench]);
+    await loadRoutine(c.db, "2026-10-03", c.routineId, undefined, true);
+    expect(await targets(c, "2026-10-03", c.bench)).toEqual([[9, 135, "9"], [7, 135, "7"], [20, 95, "20"]]);
   });
 });
 

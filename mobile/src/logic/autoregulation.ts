@@ -41,6 +41,9 @@ export function repRange(set: Pick<WorkoutSet, "reps_min" | "reps_max">): { min:
   return { min, max: set.reps_max ?? Math.max(DEFAULT_REP_RANGE.max, min) };
 }
 
+/** Logged reps as a target: a partial rep counts as not done, so targets stay whole (user, 2026-11-14). */
+export const wholeReps = (reps: number | null) => (reps === null ? null : Math.floor(reps));
+
 export interface SetTargets {
   reps: number | null;
   weight: number | null;
@@ -71,7 +74,7 @@ export function nextTargets(
     return { reps: prev.target_reps ?? null, weight: tracksWeight ? (prev.target_weight ?? plan.weight) : plan.weight };
   }
   const weight: number | null = tracksWeight ? (prev.weight ?? prev.target_weight ?? plan.weight ?? (bodyweight ? 0 : null)) : null;
-  const reps: number = prev.reps;
+  const reps: number = wholeReps(prev.reps)!;
   // AMRAP (user requirement): reps follow the same +1 / match rule with no range, and the weight
   // is carried over unchanged. Changing it is left to the user.
   if (plan.is_amrap) return { reps: reps >= (prev.target_reps ?? reps) ? reps + 1 : reps, weight };
@@ -135,18 +138,32 @@ export async function previousEntries(db: Db, date: string, workoutId: number, s
 export function carriedWarmup(prev: PreviousSet, plan: Pick<WorkoutSet, "weight">, tracksReps: boolean, tracksWeight: boolean): SetTargets {
   const done = prev.completed_at !== null;
   return {
-    reps: tracksReps ? ((done ? prev.reps : null) ?? prev.target_reps ?? null) : null,
+    reps: tracksReps ? ((done ? wholeReps(prev.reps) : null) ?? prev.target_reps ?? null) : null,
     weight: tracksWeight ? ((done ? prev.weight : null) ?? prev.target_weight ?? plan.weight) : plan.weight,
   };
 }
 
 /**
+ * A working set's targets when autoregulation is switched off for it (exercise, workout or routine;
+ * user, 2026-11-14): last time's numbers, unchanged, for the user to adjust. Checked off with reps:
+ * what was logged; otherwise last time's targets carry forward, as in `nextTargets`.
+ */
+export function carriedSet(prev: PreviousSet, plan: Pick<WorkoutSet, "weight">, tracksWeight: boolean): SetTargets {
+  if (prev.completed_at === null || prev.reps === null) {
+    return { reps: prev.target_reps ?? null, weight: tracksWeight ? (prev.target_weight ?? plan.weight) : plan.weight };
+  }
+  return { reps: wholeReps(prev.reps), weight: tracksWeight ? (prev.weight ?? prev.target_weight ?? plan.weight) : plan.weight };
+}
+
+/**
  * Targets for every set of the workout's slots when it's loaded on `date`, or null for a set that
- * keeps the plan's targets. Working sets are autoregulated (only when `autoregulate`), warmups carry
- * over unchanged (always), both from `previousEntries`. Never done before: the plan, unchanged.
+ * keeps the plan's targets. Warmups carry over unchanged (always), from `previousEntries`. Working
+ * sets, only when `autoregulate` (the Settings switch): autoregulated, unless `allowed` is false (the
+ * workout's or routine's switch) or the exercise's own switch is off; then last time's numbers carry
+ * over unchanged (`carriedSet`). Never done before: the plan, unchanged.
  */
 export async function sessionTargets(
-  db: Db, date: string, workoutId: number, slots: WorkoutSlot[], autoregulate: Autoregulate,
+  db: Db, date: string, workoutId: number, slots: WorkoutSlot[], autoregulate: Autoregulate, allowed = true,
 ): Promise<(SetTargets | null)[][]> {
   const entries = await previousEntries(db, date, workoutId, slots);
   const defaultStep = defaultStepOf(autoregulate);
@@ -165,6 +182,7 @@ export async function sessionTargets(
       }
       const prev = prevWorking[working.indexOf(ws)];
       if (!autoregulate || !prev || !wx.exercise.tracks.reps) return null;
+      if (!allowed || !wx.exercise.autoregulate) return carriedSet(prev, ws, wx.exercise.tracks.weight);
       return nextTargets(prev, ws, wx.exercise.tracks.weight, wx.exercise.weight_step ?? defaultStep, wx.exercise.uses_bodyweight);
     }));
   }
